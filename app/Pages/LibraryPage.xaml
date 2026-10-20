@@ -1,4 +1,4 @@
-<Page x:Class="QxBgmManager.Pages.LibraryPage"
+<Page x:Class="QxBgmManager.Pages.LibraryPage" Style="{StaticResource {x:Type Page}}"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -12,6 +12,53 @@
       ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
       FontFamily="{StaticResource TextThemeFontFamily}"
       Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+    <Page.Resources>
+        <!-- 只读曲库使用轻量行和单元格，避免每次筛选创建复杂的通用编辑模板。 -->
+        <Style x:Key="LibraryRow" TargetType="DataGridRow">
+            <Setter Property="MinHeight" Value="42" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridRow">
+                        <Border x:Name="RowBorder" Background="Transparent" BorderThickness="0,0,0,1" BorderBrush="{TemplateBinding BorderBrush}">
+                            <DataGridCellsPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="RowBorder" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" /></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="RowBorder" Property="Background" Value="#246EE7B7" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="LibraryCell" TargetType="DataGridCell">
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value><ControlTemplate TargetType="DataGridCell"><ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" /></ControlTemplate></Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="LibraryAction" TargetType="Button">
+            <Setter Property="Padding" Value="12,3" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonBorder" Property="Background" Value="#326EE7B7" /></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonBorder" Property="Background" Value="#326EE7B7" /></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Page.Resources>
     <Grid Margin="{StaticResource PagePadding}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -32,7 +79,7 @@
                  ItemsSource="{Binding Categories}"
                  SelectedItem="{Binding SelectedCategory}"
                  BorderThickness="0" Background="Transparent"
-                 ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                 ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Grid Height="34">
@@ -74,13 +121,13 @@
                 </Grid.ColumnDefinitions>
                 <ui:TextBox Grid.Column="0"
                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                            PlaceholderText="搜索曲名 / fileID / 索引 / 专辑"
+                            PlaceholderText="搜索曲名、编号或专辑"
                             Icon="{ui:SymbolIcon Search24}" />
                 <ComboBox Grid.Column="1" Width="96" Margin="8,0,0,0"
                           SelectedIndex="{Binding PatchFilterIndex}">
                     <ComboBoxItem Content="全部状态" />
-                    <ComboBoxItem Content="已补丁" />
-                    <ComboBoxItem Content="未补丁" />
+                    <ComboBoxItem Content="已替换" />
+                    <ComboBoxItem Content="原曲" />
                 </ComboBox>
                 <ComboBox Grid.Column="2" Width="120" Margin="8,0,0,0"
                           ItemsSource="{Binding PckFilters}"
@@ -90,7 +137,7 @@
                     <ComboBoxItem Content="按索引" />
                     <ComboBoxItem Content="按时长" />
                     <ComboBoxItem Content="按大小" />
-                    <ComboBoxItem Content="按 fileID" />
+                    <ComboBoxItem Content="按文件编号" />
                 </ComboBox>
                 <TextBlock Grid.Column="5" VerticalAlignment="Center"
                            Text="{Binding StatsText}"
@@ -109,7 +156,12 @@
                           VirtualizingPanel.IsVirtualizing="True"
                           VirtualizingPanel.VirtualizationMode="Recycling"
                           ScrollViewer.CanContentScroll="True"
+                          VirtualizingPanel.ScrollUnit="Pixel"
+                          VirtualizingPanel.CacheLength="1"
+                          VirtualizingPanel.CacheLengthUnit="Page"
                           RowHeight="42"
+                          RowStyle="{StaticResource LibraryRow}"
+                          CellStyle="{StaticResource LibraryCell}"
                           Foreground="{DynamicResource TextFillColorPrimaryBrush}">
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="曲名" Width="2.2*">
@@ -128,7 +180,7 @@
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
                         <DataGridTextColumn Header="索引" Binding="{Binding IndexText}" Width="0.6*" />
-                        <DataGridTextColumn Header="fileID" Binding="{Binding FileId}" Width="1*" />
+                        <DataGridTextColumn Header="文件编号" Binding="{Binding FileId}" Width="1*" />
                         <DataGridTemplateColumn Header="分类" Width="0.9*">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
@@ -142,10 +194,10 @@
                         </DataGridTemplateColumn>
                         <DataGridTextColumn Header="时长" Binding="{Binding DurationText}" Width="0.7*" />
                         <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="0.8*" />
-                        <DataGridTemplateColumn Header="补丁" Width="0.7*">
+                        <DataGridTemplateColumn Header="状态" Width="0.7*">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="已补丁" Foreground="#6EE7B7" FontWeight="SemiBold"
+                                    <TextBlock Text="已替换" Foreground="#6EE7B7" FontWeight="SemiBold"
                                                VerticalAlignment="Center"
                                                Visibility="{Binding IsPatched, Converter={StaticResource BoolToVis}}" />
                                 </DataTemplate>
@@ -154,7 +206,7 @@
                         <DataGridTemplateColumn Header="操作" Width="0.8*">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
-                                    <ui:Button Content="{Binding Playing, Converter={StaticResource BoolToText}, ConverterParameter='停止|试听'}"
+                                    <Button Style="{StaticResource LibraryAction}" Content="{Binding Playing, Converter={StaticResource BoolToText}, ConverterParameter='停止|试听'}"
                                                Command="{Binding DataContext.PlayCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                CommandParameter="{Binding}"
                                                IsEnabled="{Binding Busy, Converter={StaticResource InverseBool}}"

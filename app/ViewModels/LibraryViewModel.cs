@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QxBgmManager.Services;
@@ -19,7 +20,8 @@ public partial class LibraryViewModel : ObservableObject
     [ObservableProperty] private CategoryItem? _selectedCategory;
 
     /// <summary>过滤/排序后的可见行。</summary>
-    [ObservableProperty] private ObservableCollection<TrackRow> _rows = new();
+    public ListCollectionView Rows { get; }
+    private bool _rebuilding;
 
     [ObservableProperty] private string _searchText = "";
     [ObservableProperty] private int _patchFilterIndex;   // 0 全部 / 1 已补丁 / 2 未补丁
@@ -42,6 +44,7 @@ public partial class LibraryViewModel : ObservableObject
 
     public LibraryViewModel()
     {
+        Rows = new ListCollectionView(_allRows);
         AudioPreviewService.PlaybackChanged += OnPlaybackChanged;
         _ = RefreshAsync();
     }
@@ -53,7 +56,7 @@ public partial class LibraryViewModel : ObservableObject
     {
         var swTotal = Stopwatch.StartNew();
         IsLoading = true;
-        StatusText = "正在解析 8 个 BeydMusic pck…";
+        StatusText = "正在加载曲库…";
         try
         {
             var root = SettingsService.Current.GameRoot;
@@ -71,9 +74,11 @@ public partial class LibraryViewModel : ObservableObject
 
             sw.Restart();
             _allRows.Clear();
+            var patches = AppState.Library.Select(e => e.PckPath).Distinct()
+                .ToDictionary(p => p, AppState.PatchedIds);
             foreach (var e in AppState.Library)
             {
-                var patched = AppState.PatchedIds(e.PckPath);
+                var patched = patches[e.PckPath];
                 _allRows.Add(new TrackRow(e, AppState.InfoOf(e.FileId), patched.Contains(e.FileId)));
             }
             sw.Stop();
@@ -81,7 +86,7 @@ public partial class LibraryViewModel : ObservableObject
 
             RebuildCategories();
             ApplyFilters();
-            StatusText = $"{message}（{SettingsService.BeyondUgcDir(root)}）";
+            StatusText = $"已加载 {_allRows.Count} 首音乐";
             OnPlaybackChanged();
             swTotal.Stop();
             Debug.WriteLine($"[Perf] RefreshAsync 总计（数据+VM 侧）: {swTotal.ElapsedMilliseconds} ms；渲染在 UI 线程另行发生");
@@ -113,8 +118,13 @@ public partial class LibraryViewModel : ObservableObject
             Count = d.Key == CategoryAll ? _allRows.Count
                 : _allRows.Count(r => r.CategoryKey == d.Key),
         }).ToList();
-        Categories = new ObservableCollection<CategoryItem>(items);
-        SelectedCategory = items.FirstOrDefault(i => i.Key == selectedKey) ?? items[0];
+        _rebuilding = true;
+        try
+        {
+            Categories = new ObservableCollection<CategoryItem>(items);
+            SelectedCategory = items.FirstOrDefault(i => i.Key == selectedKey) ?? items[0];
+        }
+        finally { _rebuilding = false; }
     }
 
     // ---- 过滤与排序 ----
@@ -135,6 +145,7 @@ public partial class LibraryViewModel : ObservableObject
 
     internal void ApplyFilters()
     {
+        if (_rebuilding) return;
         var sw = Stopwatch.StartNew();
         IEnumerable<TrackRow> q = _allRows;
 
@@ -176,7 +187,16 @@ public partial class LibraryViewModel : ObservableObject
                     .ThenBy(r => r.FileId),
         };
 
-        Rows = new ObservableCollection<TrackRow>(q);
+        // 保持同一个视图和行实例，避免每次筛选都替换 ItemsSource、重建整个表格。
+        var filtered = q.ToList();
+        var visible = filtered.ToHashSet();
+        var order = filtered.Select((row, index) => (row, index)).ToDictionary(p => p.row, p => p.index);
+        using (Rows.DeferRefresh())
+        {
+            Rows.Filter = item => item is TrackRow row && visible.Contains(row);
+            Rows.CustomSort = Comparer<TrackRow>.Create((a, b) => order.GetValueOrDefault(a, int.MaxValue)
+                .CompareTo(order.GetValueOrDefault(b, int.MaxValue)));
+        }
         HasRows = Rows.Count > 0;
         var cat = SelectedCategory is { Key: not CategoryAll } c ? $" · {c.Name}" : "";
         StatsText = $"共 {Rows.Count} 条{cat}";
@@ -225,7 +245,7 @@ public partial class LibraryViewModel : ObservableObject
 
     private void OnPlaybackChanged()
     {
-        foreach (var r in Rows) r.Playing = AudioPreviewService.IsPlayingPath(r.WavPreviewPath);
+        foreach (var r in _allRows) r.Playing = AudioPreviewService.IsPlayingPath(r.WavPreviewPath);
     }
 
     /// <summary>切回页面且未重刷时同步播放态（内部/自测用）。</summary>

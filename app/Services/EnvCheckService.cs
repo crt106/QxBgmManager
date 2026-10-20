@@ -16,8 +16,11 @@ public partial class EnvCheckItem : ObservableObject
     public EnvCheckLevel Level { get; init; }
     public EnvCheckFix Fix { get; set; }
 
-    [ObservableProperty] private EnvCheckStatus _status = EnvCheckStatus.Pending;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanFix))]
+    private EnvCheckStatus _status = EnvCheckStatus.Pending;
     [ObservableProperty] private string _detail = "待检查";
+    public bool CanFix => Fix == EnvCheckFix.OpenSettings && Status is EnvCheckStatus.Fail or EnvCheckStatus.Warn;
 }
 
 /// <summary>首次启动闸门：逐项异步环境检查。关键项(●)全过才能进入主菜单。</summary>
@@ -26,11 +29,11 @@ public static class EnvCheckService
     public static List<EnvCheckItem> CreateItems() =>
     [
         new() { Name = "游戏根目录", Level = EnvCheckLevel.Critical, Fix = EnvCheckFix.OpenSettings },
-        new() { Name = "曲库目录可写", Level = EnvCheckLevel.Critical, Fix = EnvCheckFix.OpenSettings },
+        new() { Name = "曲库读写", Level = EnvCheckLevel.Critical, Fix = EnvCheckFix.OpenSettings },
         new() { Name = "Python 可用", Level = EnvCheckLevel.Critical, Fix = EnvCheckFix.OpenSettings },
-        new() { Name = "编码依赖 numpy", Level = EnvCheckLevel.Critical, Fix = EnvCheckFix.OpenSettings },
+        new() { Name = "音频编码组件", Level = EnvCheckLevel.Critical, Fix = EnvCheckFix.OpenSettings },
         new() { Name = "ffmpeg 可用", Level = EnvCheckLevel.Critical, Fix = EnvCheckFix.OpenSettings },
-        new() { Name = "曲名映射 track-map.json", Level = EnvCheckLevel.Critical },
+        new() { Name = "曲目信息", Level = EnvCheckLevel.Critical },
         new() { Name = "WebView2 运行时（奇域浏览页）", Level = EnvCheckLevel.Optional },
         new() { Name = ".NET 运行时", Level = EnvCheckLevel.Optional },
     ];
@@ -92,8 +95,8 @@ public static class EnvCheckService
             return (EnvCheckStatus.Fail, "未找到 YuanShen_Data\\StreamingAssets\\AudioAssets\\BeyondUGC", EnvCheckFix.OpenSettings);
         int pcks = SettingsService.MusicPckPaths(root).Count;
         return pcks == 8
-            ? (EnvCheckStatus.Pass, $"有效，8/8 BeydMusic pck（{root}）", null)
-            : (EnvCheckStatus.Fail, $"BeydMusic pck 不齐：{pcks}/8", EnvCheckFix.OpenSettings);
+            ? (EnvCheckStatus.Pass, "已找到完整曲库", null)
+            : (EnvCheckStatus.Fail, "游戏音乐文件不完整，请修复游戏", EnvCheckFix.OpenSettings);
     }
 
     /// <summary>● 曲库目录可写（patch 会原位写 pck）。</summary>
@@ -105,8 +108,8 @@ public static class EnvCheckService
             return (EnvCheckStatus.Fail, "游戏根目录无效，无法测试", EnvCheckFix.OpenSettings);
         string dir = SettingsService.BeyondUgcDir(root);
         return CheckDirWritable(dir)
-            ? (EnvCheckStatus.Pass, "临时文件创建/删除成功：" + dir, null)
-            : (EnvCheckStatus.Fail, "目录不可写，patch/复原会失败：" + dir, null);
+            ? (EnvCheckStatus.Pass, "可正常读写", null)
+            : (EnvCheckStatus.Fail, "无法写入，请检查文件夹权限", EnvCheckFix.OpenSettings);
     }
 
     /// <summary>目录可写自测：创建后立即删除临时文件。</summary>
@@ -160,8 +163,8 @@ public static class EnvCheckService
         var (ok, output) = await SettingsService.RunProbeAsync(
             SettingsService.ResolvePython(), $"-c \"{code}\"");
         return ok
-            ? (EnvCheckStatus.Pass, "numpy " + output.Split('\n').FirstOrDefault(), null)
-            : (EnvCheckStatus.Fail, "numpy 不可用：" + output, EnvCheckFix.OpenSettings);
+            ? (EnvCheckStatus.Pass, "可用", null)
+            : (EnvCheckStatus.Fail, "编码组件缺失，请检查运行环境", EnvCheckFix.OpenSettings);
     }
 
     /// <summary>● ffmpeg 可用：配置路径存在且 -version 可执行。</summary>
@@ -172,7 +175,7 @@ public static class EnvCheckService
             return (EnvCheckStatus.Fail, "ffmpeg 不存在：" + (path == "" ? "(未配置)" : path), EnvCheckFix.OpenSettings);
         var (ok, output) = await SettingsService.RunProbeAsync(path, "-version");
         return ok
-            ? (EnvCheckStatus.Pass, (output.Split('\n').FirstOrDefault() ?? "OK")[..Math.Min(60, output.Length)], null)
+            ? (EnvCheckStatus.Pass, "可用", null)
             : (EnvCheckStatus.Fail, "ffmpeg 无法执行：" + output, EnvCheckFix.OpenSettings);
     }
 
@@ -182,11 +185,11 @@ public static class EnvCheckService
         await Task.CompletedTask;
         // 来源 1：索引仓库 config/track-map.json 的缓存副本
         if (AppState.SharedTrackMap is { Count: > 0 } shared)
-            return (EnvCheckStatus.Pass, $"{shared.Count} 条映射（来源：索引仓库 config/track-map.json）", null);
+            return (EnvCheckStatus.Pass, $"已载入 {shared.Count} 首曲目信息", null);
         // 来源 2：本地研究目录 track-map.json
         var file = TrackMapService.MapFile;
         if (!File.Exists(file))
-            return (EnvCheckStatus.Warn, "两处均无：索引仓库共享副本与本地 track-map.json 都缺失，全部条目按未识别显示，不影响核心功能", null);
+            return (EnvCheckStatus.Warn, "暂缺曲名，可前往方案市场刷新", null);
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllText(file));
@@ -196,12 +199,12 @@ public static class EnvCheckService
                 : default;
             int count = tracks.ValueKind == JsonValueKind.Array ? tracks.GetArrayLength() : 0;
             return count > 0
-                ? (EnvCheckStatus.Pass, $"{count} 条映射（来源：本地 track-map.json）", null)
+                ? (EnvCheckStatus.Pass, $"已载入 {count} 首曲目信息", null)
                 : (EnvCheckStatus.Warn, "本地文件存在但没有条目", null);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return (EnvCheckStatus.Warn, "本地文件损坏：" + ex.Message + "（按未识别降级）", null);
+            return (EnvCheckStatus.Warn, "曲目信息读取失败，请刷新方案市场", null);
         }
     }
 

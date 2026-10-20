@@ -12,9 +12,9 @@ namespace QxBgmManager.ViewModels;
 /// </summary>
 public partial class ConvertViewModel : ObservableObject
 {
-    public const string JobEncode = "音频→wem";
-    public const string JobDecode = "wem→音频";
-    public const string JobExtract = "pck→wem";
+    public const string JobEncode = "音频转 WEM";
+    public const string JobDecode = "WEM 转音频";
+    public const string JobExtract = "导出音乐";
 
     // 输入列表
     [ObservableProperty] private ObservableCollection<ConvertJob> _audioJobs = new();
@@ -37,7 +37,8 @@ public partial class ConvertViewModel : ObservableObject
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private int _queueDone;
     [ObservableProperty] private int _queueTotal;
-    [ObservableProperty] private string _queueStatus = "";
+    [ObservableProperty] private string _queueStatus = "转换队列";
+    [ObservableProperty] private double _queueProgress;
 
     public ObservableCollection<ConvertJob> Queue { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
@@ -199,6 +200,7 @@ public partial class ConvertViewModel : ObservableObject
         IsRunning = true;
         QueueTotal = pending.Count;
         QueueDone = 0;
+        QueueProgress = 0;
         QueueStatus = "队列执行中…";
         foreach (var job in pending)
         {
@@ -219,6 +221,7 @@ public partial class ConvertViewModel : ObservableObject
                 Log($"{job.Kind} {Path.GetFileName(job.InputPath)}：{ex.Message}");
             }
             QueueDone++;
+            QueueProgress = QueueDone * 100.0 / QueueTotal;
         }
         IsRunning = false;
         if (QueueStatus.StartsWith("队列执行中"))
@@ -238,7 +241,8 @@ public partial class ConvertViewModel : ObservableObject
                 string outWem = Path.Combine(EncodeOutDir,
                     Path.GetFileNameWithoutExtension(job.InputPath) + ".wem");
                 int rc = await _runner.EncodeAsync(job.InputPath, outWem,
-                    HzForIndex(job.PresetIndex), Log, ct, loop: job.Loop);
+                    HzForIndex(job.PresetIndex), Log, ct, loop: job.Loop,
+                    onProgress: p => ReportProgress(job, p));
                 if (rc != 0 || !File.Exists(outWem)) throw new InvalidOperationException("编码失败（退出码 " + rc + "）");
                 job.Status = "完成";
                 job.Detail = $"{new FileInfo(outWem).Length:N0} B → {outWem}";
@@ -248,7 +252,8 @@ public partial class ConvertViewModel : ObservableObject
             {
                 string baseName = Path.GetFileNameWithoutExtension(job.InputPath);
                 string outWav = Path.Combine(DecodeOutDir, baseName + ".wav");
-                int rc = await _runner.DecodeToWavAsync(job.InputPath, outWav, Log, ct);
+                int rc = await _runner.DecodeToWavAsync(job.InputPath, outWav, Log, ct,
+                    p => ReportProgress(job, p));
                 if (rc != 0 || !File.Exists(outWav)) throw new InvalidOperationException("解码失败（退出码 " + rc + "）");
                 if (job.ToMp3)
                 {
@@ -291,7 +296,18 @@ public partial class ConvertViewModel : ObservableObject
         try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
 
-    private void Log(string line) => App.Dispatch(() => LogLines.Add(line));
+    private void ReportProgress(ConvertJob job, EncodeProgress progress) => App.Dispatch(() =>
+    {
+        job.Progress = progress.Percent;
+        job.Detail = progress.DisplayText;
+        QueueProgress = (QueueDone + progress.Percent / 100) * 100 / Math.Max(1, QueueTotal);
+    });
+
+    private void Log(string line) => App.Dispatch(() =>
+    {
+        LogLines.Add(line);
+        while (LogLines.Count > 300) LogLines.RemoveAt(0);
+    });
 }
 
 /// <summary>转换队列任务。</summary>
@@ -304,6 +320,7 @@ public partial class ConvertJob : ObservableObject
 
     [ObservableProperty] private string _status = "";
     [ObservableProperty] private string _detail = "";
+    [ObservableProperty] private double _progress;
     // 仅音频→wem：0=normal 1=chiptune-6k
     [ObservableProperty] private int _presetIndex;
     [ObservableProperty] private bool _loop;

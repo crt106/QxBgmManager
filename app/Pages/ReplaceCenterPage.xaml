@@ -1,4 +1,4 @@
-<Page x:Class="QxBgmManager.Pages.ReplaceCenterPage"
+<Page x:Class="QxBgmManager.Pages.ReplaceCenterPage" Style="{StaticResource {x:Type Page}}"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -19,8 +19,8 @@
 
             <!-- 更新警告条：有活动补丁时必须醒目 -->
             <ui:InfoBar Margin="0,0,0,12"
-                        Title="补丁处于活动状态"
-                        Message="游戏版本更新/校验文件前必须复原所有补丁，否则可能触发文件校验失败或更新覆盖冲突。"
+                        Title="已替换音乐"
+                        Message="更新或修复游戏前，请先恢复原曲。"
                         Severity="Warning" IsClosable="False" IsOpen="{Binding HasPatches}" />
 
             <!-- YuanShen.exe 运行状态 -->
@@ -35,10 +35,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="YuanShen.exe 运行状态" />
-                        <ui:TextBlock Grid.Row="1" Grid.Column="0"
-                                      Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="游戏运行中可热替换（流式音乐每次播放重读磁盘），但写入/复原可能因文件占用失败。" />
+                        <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="游戏状态" />
                         <StackPanel Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
                                     Margin="0,0,36,0" VerticalAlignment="Center" Orientation="Horizontal">
                             <Ellipse Width="10" Height="10" VerticalAlignment="Center"
@@ -62,7 +59,7 @@
                         <ui:TextBlock Grid.Row="0" FontTypography="Body" Text="替换任务" />
                         <ui:TextBlock Grid.Row="1"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="添加源音频并为每行选目标条目；逐行 编码 → 容量校验 → 打补丁（队列并发 1）" />
+                                      Text="添加音频，选择要替换的原曲。" />
                     </Grid>
                 </ui:CardExpander.Header>
                 <StackPanel>
@@ -77,38 +74,40 @@
                         </StackPanel>
                     </Grid>
                     <ListBox Margin="16" MinHeight="120" MaxHeight="260" AllowDrop="True"
-                             ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ItemsSource="{Binding Jobs}"
                              Drop="JobsList_Drop"
                              Background="{DynamicResource ControlFillColorSecondaryBrush}"
                              BorderThickness="1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <StackPanel Orientation="Horizontal" Margin="2">
-                                    <TextBlock Text="{Binding FileName}" Width="200" VerticalAlignment="Center"
+                                <Grid Margin="2">
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="3*" /><ColumnDefinition Width="110" /><ColumnDefinition Width="80" /></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding FileName}" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis" />
-                                    <ComboBox Width="330" Margin="8,0,0,0"
+                                    <ComboBox Grid.Column="1" Margin="8,0,0,0"
                                               ItemsSource="{Binding DataContext.Targets, RelativeSource={RelativeSource AncestorType=Page}}"
                                               SelectedItem="{Binding Target}"
-                                              ToolTip="目标条目（索引 曲名 · 容量）">
+                                              ToolTip="选择原曲">
                                         <ComboBox.ItemTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding CapacityText}" />
                                             </DataTemplate>
                                         </ComboBox.ItemTemplate>
                                     </ComboBox>
-                                    <ComboBox Width="110" Margin="8,0,0,0" SelectedIndex="{Binding PresetIndex}"
+                                    <ComboBox Grid.Column="2" Margin="8,0,0,0" SelectedIndex="{Binding PresetIndex}"
                                               ItemsSource="{Binding DataContext.PresetNames, RelativeSource={RelativeSource AncestorType=Page}}" />
-                                    <TextBlock Text="{Binding Status}" Width="70" Margin="10,0,0,0"
+                                    <TextBlock Grid.Column="3" Text="{Binding Status}" Margin="10,0,0,0"
                                                VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding Detail}" Margin="8,0,0,0" VerticalAlignment="Center"
+                                    <TextBlock Grid.Row="1" Grid.ColumnSpan="4" Text="{Binding Detail}" Margin="0,4,0,0" TextWrapping="Wrap" VerticalAlignment="Center"
                                                Foreground="{Binding TargetConflict, Converter={StaticResource BoolToWarnBrush}}" />
-                                </StackPanel>
+                                </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
                     <Grid Margin="16,0,16,8">
-                        <ProgressBar Minimum="0" Maximum="{Binding TotalCount}" Value="{Binding DoneCount}" Height="6" />
+                        <ProgressBar Minimum="0" Maximum="100" Value="{Binding ExecuteProgress}" Height="6" />
                     </Grid>
                     <Grid Margin="16,0,16,16">
                         <Grid.ColumnDefinitions>
@@ -143,7 +142,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="活动补丁" />
+                        <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="已替换音乐" />
                         <ui:TextBlock Grid.Row="1" Grid.Column="0"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
                                       Text="{Binding PatchesStatus}" />
@@ -151,7 +150,7 @@
                                    Content="刷新" Icon="{ui:SymbolIcon ArrowClockwise24}"
                                    Command="{Binding RefreshPatchesCommand}" />
                         <ui:Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Margin="0,0,36,0"
-                                   Content="全部复原" Appearance="Danger"
+                                   Content="全部恢复" Appearance="Danger"
                                    Command="{Binding RestoreAllCommand}"
                                    IsEnabled="{Binding HasPatches}" />
                     </Grid>
@@ -164,15 +163,15 @@
                               Background="Transparent" BorderThickness="0" MaxHeight="260"
                               Foreground="{DynamicResource TextFillColorPrimaryBrush}">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Pck" Binding="{Binding PckName}" Width="130" />
-                            <DataGridTextColumn Header="fileID" Binding="{Binding FileId}" Width="110" />
+                            <DataGridTextColumn Header="音乐包" Binding="{Binding PckName}" Width="130" />
+                            <DataGridTextColumn Header="文件编号" Binding="{Binding FileId}" Width="110" />
                             <DataGridTextColumn Header="曲名" Binding="{Binding TrackName}" Width="160" />
                             <DataGridTextColumn Header="原始大小" Binding="{Binding SizeText}" Width="150" />
                             <DataGridTextColumn Header="备份时间" Binding="{Binding TimeText}" Width="160" />
                             <DataGridTemplateColumn Header="操作" Width="90">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <ui:Button Content="复原" Appearance="Secondary" Padding="12,2"
+                                        <ui:Button Content="恢复" Appearance="Secondary" Padding="12,2"
                                                    Command="{Binding DataContext.RestoreCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                    CommandParameter="{Binding}"
                                                    IsEnabled="{Binding Busy, Converter={StaticResource InverseBool}}" />

@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
 using QxBgmManager.Models;
 
 namespace QxBgmManager.Services;
@@ -19,6 +20,8 @@ public static class PckService
     public const double BytesPerSecond = 54000.0;
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
+    private static readonly ConcurrentDictionary<string, object> Gates = new(StringComparer.OrdinalIgnoreCase);
+    private static object Gate(string path) => Gates.GetOrAdd(Path.GetFullPath(path), _ => new object());
 
     public static string BackupPath(string pckPath) => pckPath + ".bgmbackup";
 
@@ -40,6 +43,11 @@ public static class PckService
     public static List<PckEntry> ListEntries(string pckPath)
     {
         using var f = File.OpenRead(pckPath);
+        return ListEntries(f, pckPath);
+    }
+
+    private static List<PckEntry> ListEntries(Stream f, string pckPath)
+    {
         long stmOff = StmLutOffset(f);
         f.Seek(stmOff, SeekOrigin.Begin);
         uint count = ReadU32(f);
@@ -99,72 +107,76 @@ public static class PckService
     /// 被覆盖的原始字节与 LUT 记录先落盘备份。同条目重复 patch 会被拒绝。
     /// </summary>
     public static PckEntry Patch(string pckPath, uint fileId, string wemPath)
+        => PatchWithCheckpoint(pckPath, fileId, wemPath, null);
+
+    // 故障注入仅供离线自测，在真实写入边界检查备份与中断恢复。
+    internal static PckEntry PatchWithCheckpoint(string pckPath, uint fileId, string wemPath, Action<string>? checkpoint)
     {
-        var newBytes = File.ReadAllBytes(wemPath);
-        if (newBytes.Length < 12 ||
-            Encoding.ASCII.GetString(newBytes, 0, 4) != "RIFF" ||
-            Encoding.ASCII.GetString(newBytes, 8, 4) != "WAVE")
-            throw new InvalidDataException("替换文件不是 RIFF/WAVE（.wem）格式");
-
-        var e = GetEntry(pckPath, fileId);
-        if (newBytes.Length > e.Size)
-            throw new InvalidDataException(
-                $"替换文件 {newBytes.Length:N0} B 大于条目容量 {e.Size:N0} B，请选更小的编码或更长的原曲");
-
-        string bp = BackupPath(pckPath);
-        BgmBackup backup;
-        if (File.Exists(bp))
+        lock (Gate(pckPath))
         {
-            backup = ReadBackup(pckPath)
-                     ?? throw new InvalidDataException($"备份文件损坏：{bp}");
-            if (backup.Entries.Any(b => b.FileId == fileId))
-                throw new InvalidOperationException($"fileID {fileId} 已处于补丁状态，请先复原");
-        }
-        else
-        {
-            backup = new BgmBackup { Pck = Path.GetFullPath(pckPath) };
-        }
+            var newBytes = File.ReadAllBytes(wemPath);
+            if (newBytes.Length < 12 ||
+                Encoding.ASCII.GetString(newBytes, 0, 4) != "RIFF" ||
+                Encoding.ASCII.GetString(newBytes, 8, 4) != "WAVE")
+                throw new InvalidDataException("替换文件不是 RIFF/WAVE（.wem）格式");
 
-        byte[] origWem;
-        byte[] origLut;
-        // 游戏运行中 pck 可能被独占：FileShare.Read 打开失败时抛 IOException，由调用方友好提示
-        using (var f = new FileStream(pckPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
-        {
+            // 从读取到写入始终持有同一文件句柄，禁止其他写入者在容量检查后改动文件。
+            using var f = new FileStream(pckPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+            var e = ListEntries(f, pckPath).FirstOrDefault(e => e.FileId == fileId)
+                ?? throw new InvalidDataException($"未找到音乐条目 {fileId}");
+            if (newBytes.Length > e.Size)
+                throw new InvalidDataException(
+                    $"替换文件 {newBytes.Length:N0} B 大于条目容量 {e.Size:N0} B，请选更小的编码或更长的原曲");
+
+            string bp = BackupPath(pckPath);
+            BgmBackup backup;
+            if (File.Exists(bp))
+            {
+                backup = ReadBackup(pckPath)
+                         ?? throw new InvalidDataException($"备份文件损坏：{bp}");
+                if (backup.Entries.Any(b => b.FileId == fileId))
+                    throw new InvalidOperationException($"fileID {fileId} 已处于补丁状态，请先复原");
+            }
+            else
+            {
+                backup = new BgmBackup { Pck = Path.GetFullPath(pckPath) };
+            }
+
             f.Seek((long)e.Offset, SeekOrigin.Begin);
-            origWem = new byte[e.Size];
+            byte[] origWem = new byte[e.Size];
             ReadExact(f, origWem);
             f.Seek(e.LutPos, SeekOrigin.Begin);
-            origLut = new byte[LutEntrySize];
+            byte[] origLut = new byte[LutEntrySize];
             ReadExact(f, origLut);
+            string binPath = $"{bp}.{fileId}.bin";
+            var record = new BackupEntry
+            {
+                FileId = e.FileId,
+                Offset = e.Offset,
+                Size = e.Size,
+                LutPos = e.LutPos,
+                OrigWemB64 = null,
+                OrigWemFile = Path.GetFileName(binPath),
+                OrigLutHex = ToHexLower(origLut),
+            };
+            // 先持久化音频备份，再原子提交清单；任一步失败都不能触碰 PCK。
+            WriteAtomic(binPath, origWem, overwrite: false);
+            backup.Entries.Add(record);
+            try { SaveBackup(bp, backup); }
+            catch { File.Delete(binPath); throw; }
+            checkpoint?.Invoke("backup-saved");
 
-            // 原位写入新 wem + 尾部清零，再把 LUT size 改为新大小（offset/fileID/lang 不动）
+            // 此后发生写入失败或进程中断，完整备份保留，恢复操作可安全重试。
             f.Seek((long)e.Offset, SeekOrigin.Begin);
-            f.Write(newBytes, 0, newBytes.Length);
-            f.Write(new byte[e.Size - newBytes.Length], 0, (int)(e.Size - newBytes.Length));
+            f.Write(newBytes);
+            f.Write(new byte[e.Size - newBytes.Length]);
+            checkpoint?.Invoke("payload-written");
+            BinaryPrimitives.WriteUInt32LittleEndian(origLut.AsSpan(8), (uint)newBytes.Length);
             f.Seek(e.LutPos, SeekOrigin.Begin);
-            Span<byte> lut = stackalloc byte[LutEntrySize];
-            BinaryPrimitives.WriteUInt32LittleEndian(lut, e.FileId);
-            BinaryPrimitives.WriteUInt32LittleEndian(lut[4..], e.Lang);
-            BinaryPrimitives.WriteUInt32LittleEndian(lut[8..], (uint)newBytes.Length);
-            BinaryPrimitives.WriteUInt64LittleEndian(lut[12..], e.Offset);
-            f.Write(lut);
+            f.Write(origLut);
+            f.Flush(flushToDisk: true);
+            return e;
         }
-
-        backup.Entries.Add(new BackupEntry
-        {
-            FileId = e.FileId,
-            Offset = e.Offset,
-            Size = e.Size,
-            LutPos = e.LutPos,
-            OrigWemB64 = null,
-            OrigWemFile = null,
-            OrigLutHex = ToHexLower(origLut),
-        });
-        string binPath = $"{bp}.{fileId}.bin";
-        File.WriteAllBytes(binPath, origWem);
-        backup.Entries[^1].OrigWemFile = Path.GetFileName(binPath);
-        File.WriteAllText(bp, JsonSerializer.Serialize(backup, JsonOpts));
-        return e;
     }
 
     // ---- restore ----
@@ -172,32 +184,33 @@ public static class PckService
     /// <summary>复原一个条目的全部活动补丁（bgm_swap.py restore）。</summary>
     public static void RestoreAll(string pckPath)
     {
-        string bp = BackupPath(pckPath);
-        var backup = ReadBackup(pckPath)
-                     ?? throw new InvalidDataException("没有备份，无需复原");
-        foreach (var entry in backup.Entries.ToList())
+        lock (Gate(pckPath))
         {
-            RestoreEntry(pckPath, entry);
-            DeleteBin(pckPath, entry);
+            var backup = ReadBackup(pckPath)
+                         ?? throw new InvalidDataException("没有备份，无需复原");
+            foreach (var entry in backup.Entries.ToList()) RestoreOne(pckPath, entry.FileId);
         }
-        File.Delete(bp);
     }
 
     /// <summary>只复原一个条目，其余补丁保持活动；最后一条复原后删除整个备份文件。</summary>
     public static void RestoreOne(string pckPath, uint fileId)
     {
-        string bp = BackupPath(pckPath);
-        var backup = ReadBackup(pckPath)
-                     ?? throw new InvalidDataException("没有备份，无需复原");
-        var entry = backup.Entries.FirstOrDefault(b => b.FileId == fileId)
-                    ?? throw new InvalidDataException($"备份中没有 fileID {fileId}");
-        RestoreEntry(pckPath, entry);
-        DeleteBin(pckPath, entry);
-        backup.Entries.Remove(entry);
-        if (backup.Entries.Count == 0)
-            File.Delete(bp);
-        else
-            File.WriteAllText(bp, JsonSerializer.Serialize(backup, JsonOpts));
+        lock (Gate(pckPath))
+        {
+            string bp = BackupPath(pckPath);
+            var backup = ReadBackup(pckPath)
+                         ?? throw new InvalidDataException("没有备份，无需复原");
+            var entry = backup.Entries.FirstOrDefault(b => b.FileId == fileId)
+                        ?? throw new InvalidDataException($"备份中没有 fileID {fileId}");
+            RestoreEntry(pckPath, entry);
+            backup.Entries.Remove(entry);
+            if (backup.Entries.Count == 0)
+                File.Delete(bp);
+            else
+                SaveBackup(bp, backup);
+            // 清单更新成功后才删除数据，恢复中断时不会留下指向缺失数据的清单。
+            DeleteBin(pckPath, entry);
+        }
     }
 
     private static void RestoreEntry(string pckPath, BackupEntry entry)
@@ -207,14 +220,23 @@ public static class PckService
         if (!File.Exists(binPath))
             throw new FileNotFoundException($"备份数据文件缺失：{binPath}");
         byte[] orig = File.ReadAllBytes(binPath);
+        byte[] lut = Convert.FromHexString(entry.OrigLutHex ?? "");
+        if (lut.Length != LutEntrySize || orig.Length != entry.Size)
+            throw new InvalidDataException("备份不完整，无法恢复");
         using var f = new FileStream(pckPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
         f.Seek((long)entry.Offset, SeekOrigin.Begin);
         f.Write(orig, 0, orig.Length);
         f.Seek(entry.LutPos, SeekOrigin.Begin);
-        byte[] lut = Convert.FromHexString(entry.OrigLutHex ?? "");
-        if (lut.Length != LutEntrySize)
-            throw new InvalidDataException($"备份 LUT 记录长度异常（{lut.Length} 字节）");
         f.Write(lut, 0, lut.Length);
+        f.Flush(flushToDisk: true);
+        f.Seek((long)entry.Offset, SeekOrigin.Begin);
+        byte[] actual = new byte[orig.Length];
+        ReadExact(f, actual);
+        if (!actual.AsSpan().SequenceEqual(orig)) throw new IOException("恢复校验失败，请重试");
+        f.Seek(entry.LutPos, SeekOrigin.Begin);
+        byte[] actualLut = new byte[LutEntrySize];
+        ReadExact(f, actualLut);
+        if (!actualLut.AsSpan().SequenceEqual(lut)) throw new IOException("恢复校验失败，请重试");
     }
 
     private static void DeleteBin(string pckPath, BackupEntry entry)
@@ -225,6 +247,24 @@ public static class PckService
     }
 
     // ---- 小工具 ----
+
+    private static void SaveBackup(string path, BgmBackup backup)
+        => WriteAtomic(path, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(backup, JsonOpts)), overwrite: true);
+
+    private static void WriteAtomic(string path, byte[] bytes, bool overwrite)
+    {
+        string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                file.Write(bytes);
+                file.Flush(flushToDisk: true);
+            }
+            File.Move(temp, path, overwrite);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+    }
 
     private static void ReadExact(Stream f, Span<byte> buf)
     {

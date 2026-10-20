@@ -26,6 +26,7 @@ public partial class ReplaceCenterViewModel : ObservableObject
     [ObservableProperty] private int _doneCount;
     [ObservableProperty] private int _totalCount;
     [ObservableProperty] private string _executeStatus = "";
+    [ObservableProperty] private double _executeProgress;
 
     public ObservableCollection<string> LogLines { get; } = new();
 
@@ -114,14 +115,10 @@ public partial class ReplaceCenterViewModel : ObservableObject
             ExecuteStatus = "请为至少一行选择目标条目。";
             return;
         }
-        if (GameRunning)
-        {
-            Log("检测到 YuanShen.exe 正在运行：热替换立即生效，但 pck 可能被占用，写入失败时请关闭游戏重试。");
-        }
-
         _cts = new CancellationTokenSource();
         IsExecuting = true;
         DoneCount = 0;
+        ExecuteProgress = 0;
         TotalCount = runnable.Count;
         ExecuteStatus = "";
         int done = 0, skipped = 0, failed = 0;
@@ -133,7 +130,7 @@ public partial class ReplaceCenterViewModel : ObservableObject
                 if (job.TargetConflict)
                 {
                     job.Status = "跳过";
-                    job.Detail = "目标已补丁，需先复原";
+                    job.Detail = "请先恢复这首原曲";
                     skipped++;
                 }
                 else
@@ -146,10 +143,11 @@ public partial class ReplaceCenterViewModel : ObservableObject
                     catch (IOException ex)
                     {
                         job.Status = "失败";
-                        job.Detail = "写入失败：pck 可能被游戏占用，关闭游戏后重试";
+                        job.Detail = "替换失败，请重试";
                         Log($"{job.FileName}：{ex.Message}");
                         failed++;
                     }
+                    catch (OperationCanceledException) { throw; }
                     catch (Exception ex)
                     {
                         job.Status = "失败";
@@ -158,6 +156,7 @@ public partial class ReplaceCenterViewModel : ObservableObject
                     }
                 }
                 DoneCount++;
+                ExecuteProgress = DoneCount * 100.0 / TotalCount;
             }
             ExecuteStatus = $"执行完成：成功 {done}，跳过 {skipped}，失败 {failed}。";
             AppState.InvalidateLibrary();
@@ -180,7 +179,12 @@ public partial class ReplaceCenterViewModel : ObservableObject
         job.Status = "编码…";
         job.Detail = "";
         int rc = await _encoder.EncodeAsync(job.SourcePath, job.WemPath, HzForIndex(job.PresetIndex),
-            Log, ct);
+            Log, ct, onProgress: p => App.Dispatch(() =>
+            {
+                job.Progress = p.Percent;
+                job.Detail = p.DisplayText;
+                ExecuteProgress = (DoneCount + p.Percent / 100) * 100 / Math.Max(1, TotalCount);
+            }));
         if (rc != 0 || !File.Exists(job.WemPath))
             throw new InvalidOperationException("编码失败（退出码 " + rc + "）");
 
@@ -190,10 +194,11 @@ public partial class ReplaceCenterViewModel : ObservableObject
         if (wemSize > entry.Size)
             throw new InvalidOperationException($"产物 {wemSize:N0} B 超出条目容量 {entry.Size:N0} B，请缩短音频或换更长的目标");
 
-        job.Status = "写入补丁…";
+        ct.ThrowIfCancellationRequested();
+        job.Status = "正在替换…";
         await Task.Run(() => PckService.Patch(entry.PckPath, entry.FileId, job.WemPath), ct);
         job.Status = "完成";
-        job.Detail = $"{wemSize:N0} B ≤ {entry.Size:N0} B";
+        job.Detail = "";
         Log($"{job.FileName} → {entry.PckName} #{entry.FileId}（{wemSize:N0} B）");
     }
 
@@ -231,8 +236,8 @@ public partial class ReplaceCenterViewModel : ObservableObject
         Patches = new ObservableCollection<PatchRow>(rows);
         HasPatches = rows.Count > 0;
         PatchesStatus = HasPatches
-            ? $"{rows.Count} 条活动补丁（{rows.Select(r => r.Info.PckName).Distinct().Count()} 个 pck）"
-            : "当前没有活动补丁，曲库处于原始状态。";
+            ? $"已替换 {rows.Count} 首音乐"
+            : "暂无替换记录";
     }
 
     [RelayCommand]
@@ -243,13 +248,14 @@ public partial class ReplaceCenterViewModel : ObservableObject
         try
         {
             await Task.Run(() => PckService.RestoreOne(row.Info.PckPath, row.Info.FileId));
-            PatchesStatus = $"已复原 {row.Info.PckName} · {row.TrackName}（fileID {row.Info.FileId}）。";
+            PatchesStatus = $"已恢复「{row.TrackName}」";
             AppState.InvalidateLibrary();
             await RefreshPatchesAsync();
         }
         catch (IOException ex)
         {
-            PatchesStatus = "复原失败：pck 文件可能被游戏进程占用，请关闭游戏后重试。" + Environment.NewLine + ex.Message;
+            PatchesStatus = "恢复失败，请关闭游戏后重试。";
+            Log(ex.Message);
         }
         catch (Exception ex)
         {
@@ -266,20 +272,21 @@ public partial class ReplaceCenterViewModel : ObservableObject
     {
         if (!HasPatches) return;
         var answer = MessageBox.Show(
-            $"将复原全部 {Patches.Count} 条补丁，被替换的曲目恢复为原始音乐。继续？",
-            "全部复原", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            $"恢复全部 {Patches.Count} 首原曲？",
+            "恢复原曲", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return;
         try
         {
             foreach (var pck in Patches.Select(r => r.Info.PckPath).Distinct())
                 await Task.Run(() => PckService.RestoreAll(pck));
-            PatchesStatus = "全部补丁已复原，曲库恢复原始状态。";
+            PatchesStatus = "已恢复全部原曲";
             AppState.InvalidateLibrary();
             await RefreshPatchesAsync();
         }
         catch (IOException ex)
         {
-            PatchesStatus = "复原失败：pck 文件可能被游戏进程占用，请关闭游戏后重试。" + Environment.NewLine + ex.Message;
+            PatchesStatus = "恢复失败，请关闭游戏后重试。";
+            Log(ex.Message);
             await RefreshPatchesAsync();
         }
         catch (Exception ex)
@@ -302,6 +309,7 @@ public partial class ReplaceJob : ObservableObject
     [ObservableProperty] private int _presetIndex;   // 0 普通 / 1 8bit(6kHz 低通)
     [ObservableProperty] private string _status = "待执行";
     [ObservableProperty] private string _detail = "";
+    [ObservableProperty] private double _progress;
 
     public string FileName => Path.GetFileName(SourcePath);
     public string WemPath => Path.Combine(SettingsService.ImportDir,
@@ -310,8 +318,8 @@ public partial class ReplaceJob : ObservableObject
     partial void OnTargetChanged(TrackRow? value)
     {
         TargetConflict = value is { IsPatched: true };
-        if (TargetConflict) Detail = "目标已补丁，需先在下方复原";
-        else if (Detail == "目标已补丁，需先在下方复原") Detail = "";
+        if (TargetConflict) Detail = "请先在下方恢复这首原曲";
+        else if (Detail == "请先在下方恢复这首原曲") Detail = "";
     }
 }
 

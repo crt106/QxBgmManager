@@ -1,4 +1,4 @@
-<Page x:Class="QxBgmManager.Pages.SettingsPage"
+<Page x:Class="QxBgmManager.Pages.SettingsPage" Style="{StaticResource {x:Type Page}}"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -50,7 +50,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <ui:TextBox Text="{Binding GameRoot, UpdateSourceTrigger=PropertyChanged}"
-                                    PlaceholderText="含 YuanShen_Data 的那一级，如 F:\Program Files\Genshin Impact\Genshin Impact Game" />
+                                    PlaceholderText="选择原神安装文件夹" />
                     </Grid>
                     <Grid Margin="16,0,16,16">
                         <StackPanel Orientation="Horizontal">
@@ -96,7 +96,7 @@
                                       Text="Python" />
                         <ui:TextBlock Grid.Row="1" Grid.Column="0"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="3.13；编码脚本会从 vendor\python-deps 自加载 numpy。默认 python 由 PATH 解析。" />
+                                      Text="音频转码所需的运行环境。" />
                     </Grid>
                 </ui:CardExpander.Header>
                 <StackPanel>
@@ -133,7 +133,7 @@
                                       Text="ffmpeg" />
                         <ui:TextBlock Grid.Row="1" Grid.Column="0"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="8bit 预设的低通滤波用它；编码脚本内部解码 PCM 也走同一可执行文件。" />
+                                      Text="用于读取和转换音频。" />
                     </Grid>
                 </ui:CardExpander.Header>
                 <StackPanel>
@@ -163,10 +163,10 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="方案市场索引源" />
+                        <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="方案来源" />
                         <ui:TextBlock Grid.Row="1" Grid.Column="0"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="本地索引仓库路径（已克隆）或 git URL（自动浅克隆到 app\data\registry）" />
+                                      Text="填写仓库地址或本地文件夹。" />
                     </Grid>
                 </ui:CardControl.Header>
                 <Grid MinWidth="420">
@@ -254,7 +254,7 @@
                                       Text="外观" />
                         <ui:TextBlock Grid.Row="1" Grid.Column="0"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="切换深浅主题（即时生效并保存）" />
+                                      Text="选择应用主题。" />
                         <StackPanel Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
                                     Margin="0,0,36,0"
                                     VerticalAlignment="Center"
@@ -289,7 +289,7 @@
                         <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="硬件渲染" />
                         <ui:TextBlock Grid.Row="1" Grid.Column="0"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="默认开启（GPU 渲染，更流畅，自动关闭窗口背景材质）。如遇黑屏请关闭（降级为软件渲染）。重启后生效。" />
+                                      Text="重启后生效。" />
                         <ui:ToggleSwitch Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" Margin="0,0,36,0"
                                          IsChecked="{Binding RenderHardware}" />
                     </Grid>

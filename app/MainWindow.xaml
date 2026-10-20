@@ -6,7 +6,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:pages="clr-namespace:QxBgmManager.Pages"
         Title="千星BGM替换管理器"
-        Width="1280" Height="800" MinWidth="1100" MinHeight="700"
+        Width="1280" Height="800" MinWidth="1100" MinHeight="520"
         d:DesignHeight="800" d:DesignWidth="1280"
         ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
         ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
@@ -64,6 +64,7 @@
                            IsTopSeparatorVisible="False"
                            IsFooterSeparatorVisible="False"
                            OpenPaneLength="200"
+                           Transition="None"
                            PaneTitle="千星BGM替换管理器"
                            SelectionChanged="RootNavigation_SelectionChanged">
             <ui:NavigationView.MenuItems>

@@ -3,7 +3,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              xmlns:vio="http://schemas.lepo.co/wpfui/2022/xaml/violeta"
-             xmlns:conv="clr-namespace:QxBgmManager.Converters">
+             xmlns:conv="clr-namespace:QxBgmManager.Converters"
+             xmlns:services="clr-namespace:QxBgmManager.Services">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -41,6 +42,9 @@
 
             <Style TargetType="Page">
                 <Setter Property="Background" Value="{DynamicResource ApplicationBackgroundBrush}" />
+                <!-- 禁用导航框架的外层滚动，让页面取得有限高度并自行滚动。 -->
+                <Setter Property="ScrollViewer.CanContentScroll" Value="False" />
+                <Setter Property="services:ScrollBehavior.IsEnabled" Value="True" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>

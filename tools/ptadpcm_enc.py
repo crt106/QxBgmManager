@@ -11,6 +11,9 @@ import os
 import struct
 import subprocess
 import sys
+import json
+import time
+import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "vendor", "python-deps"))
 import numpy as np  # noqa: E402
@@ -51,9 +54,10 @@ STEP_TAB = np.array([[s for s, _ in row] for row in _TABLE_ROWS] + [[0] * 16], d
 NEXT_TAB = np.array([[n for _, n in row] for row in _TABLE_ROWS] + [[0] * 16], dtype=np.int32)
 
 
-def load_pcm(path, channels, rate=RATE):
+def load_pcm(path, channels, rate=RATE, lowpass=0):
+    filters = ["-af", f"lowpass=f={lowpass:g}"] if lowpass > 0 else []
     r = subprocess.run([
-        FFMPEG, "-v", "error", "-i", path, "-ar", str(rate), "-ac", str(channels),
+        FFMPEG, "-v", "error", "-i", path, *filters, "-ar", str(rate), "-ac", str(channels),
         "-f", "s16le", "-",
     ], capture_output=True)
     if r.returncode != 0:
@@ -111,7 +115,7 @@ def encode_channel(samples, heuristic_idx=True, lookahead=0):
     return out
 
 
-def encode_channel_beam(samples, beam=64, ef=0.0):
+def _encode_channel_beam_reference(samples, beam=64, ef=0.0):
     """beam search 近似最优编码：束宽 B 的状态 (累计误差,h1,h2,idx,路径) 逐采样扩展。
     ef>0 时开启误差反馈：把上一步量化误差的一部分带进当前目标，压低感知噪声底。"""
     n_frames = (len(samples) + SAMPLES_PER_FRAME - 1) // SAMPLES_PER_FRAME
@@ -165,23 +169,66 @@ def encode_channel_beam(samples, beam=64, ef=0.0):
     return out
 
 
-def decode_channel(frames):
-    n_frames = len(frames) // 36
-    out = np.empty(n_frames * SAMPLES_PER_FRAME, dtype=np.int32)
-    for f in range(n_frames):
-        fr = frames[f * 36:(f + 1) * 36]
-        h2, h1, idx = struct.unpack("<hhB", fr[:5])
-        pos = f * SAMPLES_PER_FRAME
-        out[pos] = h2
-        out[pos + 1] = h1
+def encode_channel_beam(samples, beam=64, ef=0.0, progress=None, batch_size=32):
+    """独立帧批量搜索；束宽、误差和破平局规则与逐帧版本保持一致。"""
+    n_frames = (len(samples) + SAMPLES_PER_FRAME - 1) // SAMPLES_PER_FRAME
+    padded = np.pad(samples, (0, n_frames * 64 - len(samples))).reshape(n_frames, 64)
+    out = np.empty((n_frames, 36), dtype=np.uint8)
+    for start in range(0, n_frames, batch_size):
+        seg = padded[start:start + batch_size]
+        n = len(seg)
+        rows = np.arange(n)[:, None]
+        b_err = np.broadcast_to(np.arange(beam, dtype=np.float64) * 1e-3, (n, beam)).copy()
+        b_h2 = np.broadcast_to(seg[:, 0, None], (n, beam)).copy()
+        b_h1 = np.broadcast_to(seg[:, 1, None], (n, beam)).copy()
+        b_idx = np.broadcast_to(np.arange(beam) % 12, (n, beam)).copy()
+        b_idx0 = b_idx.copy()
+        b_ef = np.zeros((n, beam), dtype=np.float64)
+        b_path = np.zeros((n, beam, 62), dtype=np.uint8)
         for i in range(62):
-            b = fr[5 + i // 2]
-            nib = (b >> 4) & 0xF if i & 1 else b & 0xF
-            s = max(-32768, min(32767, int(STEP_TAB[idx][nib]) + 2 * h1 - h2))
-            idx = int(NEXT_TAB[idx][nib])
-            out[pos + 2 + i] = s
-            h2, h1 = h1, s
-    return out
+            target = seg[:, i + 2, None]
+            pred = np.clip(STEP_TAB[b_idx] + 2 * b_h1[:, :, None] - b_h2[:, :, None], -32768, 32767)
+            total = b_err[:, :, None] + np.abs(pred - (target + ef * b_ef)[:, :, None])
+            flat = total.reshape(n, -1)
+            keep = np.argpartition(flat, beam, axis=1)[:, :beam]
+            keep = np.take_along_axis(keep, np.argsort(np.take_along_axis(flat, keep, axis=1), axis=1), axis=1)
+            src, nib = keep // 16, keep % 16
+            chosen = np.take_along_axis(pred.reshape(n, -1), keep, axis=1)
+            b_ef = target - chosen
+            b_err = np.take_along_axis(flat, keep, axis=1)
+            b_h2 = b_h1[rows, src]
+            b_h1 = chosen
+            b_idx = NEXT_TAB[b_idx[rows, src], nib]
+            b_idx0 = b_idx0[rows, src]
+            b_path = b_path[rows, src]
+            b_path[:, :, i] = nib
+        block = out[start:start + n]
+        block[:, :4] = seg[:, :2].astype("<i2").copy().view(np.uint8).reshape(n, 4)
+        block[:, 4] = b_idx0[:, 0]
+        best = b_path[:, 0]
+        block[:, 5:] = best[:, ::2] | (best[:, 1::2] << 4)
+        if progress:
+            progress(start + n, n_frames)
+    return out.reshape(-1)
+
+
+def decode_channel(frames):
+    """帧间无依赖，批量解码全部帧，避免逐采样执行 Python 循环。"""
+    n_frames = len(frames) // 36
+    data = np.frombuffer(bytes(frames), dtype=np.uint8).reshape(n_frames, 36)
+    heads = data[:, :4].copy().view("<i2").reshape(n_frames, 2).astype(np.int32)
+    h2, h1 = heads[:, 0], heads[:, 1]
+    idx = data[:, 4].astype(np.int64)
+    out = np.empty((n_frames, 64), dtype=np.int32)
+    out[:, :2] = heads
+    for i in range(62):
+        packed = data[:, 5 + i // 2]
+        nib = (packed >> 4) & 15 if i & 1 else packed & 15
+        sample = np.clip(STEP_TAB[idx, nib] + 2 * h1 - h2, -32768, 32767)
+        idx = NEXT_TAB[idx, nib]
+        out[:, i + 2] = sample
+        h2, h1 = h1, sample
+    return out.reshape(-1)
 
 
 def build_wem(channels, payload, num_samples, loop, rate=RATE):
@@ -200,11 +247,36 @@ def build_wem(channels, payload, num_samples, loop, rate=RATE):
     return b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WAVE" + body
 
 
-def encode_file(src, out, channels, loop, lookahead=0, heuristic_idx=False, beam=0, rate=RATE, ef=0.0):
-    pcm = load_pcm(src, channels, rate)
+class ProgressReporter:
+    def __init__(self, enabled):
+        self.enabled = enabled
+        self.started = time.perf_counter()
+        self.last = 0
+
+    def emit(self, stage, percent, force=False):
+        now = time.perf_counter()
+        if not self.enabled or (not force and now - self.last < 0.25):
+            return
+        self.last = now
+        elapsed = now - self.started
+        remaining = elapsed * (98 - percent) / (percent - 2) if 2 < percent < 98 else 0
+        print("QXBGM_PROGRESS " + json.dumps(dict(stage=stage, percent=percent,
+              elapsed=elapsed, remaining=max(0, remaining))), flush=True)
+
+
+def encode_file(src, out, channels, loop, lookahead=0, heuristic_idx=False, beam=0, rate=RATE, ef=0.0,
+                lowpass=0, progress=False):
+    reporter = ProgressReporter(progress)
+    reporter.emit("prepare", 0, True)
+    pcm = load_pcm(src, channels, rate, lowpass)
     num_samples = pcm.shape[0]
-    chans = [encode_channel(pcm[:, c], heuristic_idx, lookahead) if beam <= 0
-             else encode_channel_beam(pcm[:, c], beam, ef) for c in range(channels)]
+    if num_samples == 0:
+        raise ValueError("音频为空")
+    chans = []
+    for c in range(channels):
+        report = lambda done, total, c=c: reporter.emit("encode", 2 + 96 * (c + done / total) / channels)
+        chans.append(encode_channel(pcm[:, c], heuristic_idx, lookahead) if beam <= 0
+                     else encode_channel_beam(pcm[:, c], beam, ef, report))
     if channels == 1:
         payload = chans[0].tobytes()
     else:
@@ -213,8 +285,16 @@ def encode_file(src, out, channels, loop, lookahead=0, heuristic_idx=False, beam
         frames = np.stack([ch.reshape(nf, 36) for ch in chans], axis=1)
         payload = frames.tobytes()
     wem = build_wem(channels, payload, num_samples, loop, rate)
-    with open(out, "wb") as f:
-        f.write(wem)
+    reporter.emit("write", 99, True)
+    temp = str(out) + "." + uuid.uuid4().hex + ".tmp"
+    try:
+        with open(temp, "wb") as f:
+            f.write(wem)
+        os.replace(temp, out)
+    finally:
+        if os.path.exists(temp):
+            os.remove(temp)
+    reporter.emit("done", 100, True)
     print(f"{out}: {len(wem):,} B, {rate} Hz x {channels} ch PTADPCM, "
           f"{num_samples / rate:.1f}s" + (" (loop)" if loop else ""))
     return pcm
@@ -269,17 +349,22 @@ def main():
     ap.add_argument("--seconds", type=float, default=0, help="selftest 只用前N秒")
     ap.add_argument("--rate", type=int, default=RATE, help="采样率(默认48000)")
     ap.add_argument("--ef", type=float, default=0.0, help="误差反馈系数(0-1, 建议0.7)")
+    ap.add_argument("--lowpass", type=float, default=0, help="编码前低通频率，0 为关闭")
+    ap.add_argument("--progress", action="store_true", help="输出机器可读进度")
     args = ap.parse_args()
 
     if args.cmd == "decode":
         if not args.out:
             sys.exit("decode needs output wav path")
+        reporter = ProgressReporter(args.progress)
+        reporter.emit("prepare", 0, True)
         decode_wem(args.src, args.out)
+        reporter.emit("done", 100, True)
     elif args.cmd == "encode":
         if not args.out:
             sys.exit("encode needs output path")
         encode_file(args.src, args.out, args.channels, args.loop,
-                    args.lookahead, args.heuristic, args.beam, args.rate, args.ef)
+                    args.lookahead, args.heuristic, args.beam, args.rate, args.ef, args.lowpass, args.progress)
     else:
         pcm = load_pcm(args.src, args.channels, args.rate)
         if args.seconds > 0:

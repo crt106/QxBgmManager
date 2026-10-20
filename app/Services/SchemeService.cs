@@ -257,7 +257,7 @@ public static class SchemeService
     /// </summary>
     public static async Task<InstalledTrack?> InstallTrackAsync(SchemeManifest manifest, SchemeTrack track,
         PckEntry entry, string? packageZip, string? baseUri,
-        EncodeService encoder, Action<string> log, CancellationToken ct)
+        EncodeService encoder, Action<string> log, CancellationToken ct, Action<EncodeProgress>? onProgress = null)
     {
         string audioPath = await ResolveAudioAsync(manifest, track, packageZip, null, ct, baseUri);
         string wemPath;
@@ -266,7 +266,7 @@ public static class SchemeService
             wemPath = RawWemPath(manifest.Id, track);
             var preset = track.Encode?.Preset ?? "normal";
             int rc = await encoder.EncodeAsync(audioPath, wemPath, PresetService.HzForPreset(preset),
-                log, ct, loop: track.Encode?.Loop ?? false);
+                log, ct, loop: track.Encode?.Loop ?? false, onProgress: onProgress);
             if (rc != 0 || !File.Exists(wemPath))
                 throw new SchemeException("编码失败（退出码 " + rc + "）");
         }
@@ -283,6 +283,7 @@ public static class SchemeService
 
         if (PckService.IsEntryPatched(fresh.PckPath, fresh.FileId))
             return null; // 已补丁，跳过
+        ct.ThrowIfCancellationRequested();
         await Task.Run(() => PckService.Patch(fresh.PckPath, fresh.FileId, wemPath), ct);
         return new InstalledTrack { PckPath = fresh.PckPath, PckName = fresh.PckName, FileId = fresh.FileId };
     }

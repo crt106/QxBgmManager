@@ -1,4 +1,4 @@
-<Page x:Class="QxBgmManager.Pages.SchemesPage"
+<Page x:Class="QxBgmManager.Pages.SchemesPage" Style="{StaticResource {x:Type Page}}"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -32,7 +32,7 @@
                         <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="导入方案" />
                         <ui:TextBlock Grid.Row="1" Grid.Column="0"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="打开 .qxbgm.json（音频走 https 下载）或 .qxbgmzip（音频内置）" />
+                                      Text="选择方案文件或方案包。" />
                         <ui:Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" Margin="0,0,36,0"
                                    Content="浏览" Command="{Binding BrowseSchemeCommand}" />
                     </Grid>
@@ -67,7 +67,7 @@
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
                                       Text="{Binding ManifestMetaText}" />
                         <ui:Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" Margin="0,0,8,0"
-                                   Content="执行" Appearance="Primary"
+                                   Content="安装" Appearance="Primary"
                                    Command="{Binding ExecuteCommand}"
                                    IsEnabled="{Binding IsExecuting, Converter={StaticResource InverseBool}}" />
                         <ui:Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Margin="0,0,36,0"
@@ -100,7 +100,7 @@
                               Foreground="{DynamicResource TextFillColorPrimaryBrush}">
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="安装" Binding="{Binding Selected}" Width="50" />
-                            <DataGridTextColumn Header="fileID" Binding="{Binding FileId}" Width="100" IsReadOnly="True" />
+                            <DataGridTextColumn Header="文件编号" Binding="{Binding FileId}" Width="100" IsReadOnly="True" />
                             <DataGridTextColumn Header="曲名" Binding="{Binding RefName}" Width="130" IsReadOnly="True" />
                             <DataGridTextColumn Header="kind" Binding="{Binding KindText}" Width="110" IsReadOnly="True" />
                             <DataGridTextColumn Header="预设" Binding="{Binding PresetText}" Width="130" IsReadOnly="True" />
@@ -111,7 +111,7 @@
                         </DataGrid.Columns>
                     </DataGrid>
                     <Grid Margin="16,0,16,8">
-                        <ProgressBar Minimum="0" Maximum="{Binding TotalCount}" Value="{Binding DoneCount}" Height="6" />
+                        <ProgressBar Minimum="0" Maximum="100" Value="{Binding ExecuteProgress}" Height="6" />
                     </Grid>
                     <Grid Margin="16,0,16,16">
                         <Grid.ColumnDefinitions>
@@ -157,7 +157,7 @@
                         <ui:TextBlock Grid.Row="0" FontTypography="Body" Text="已安装方案" />
                         <ui:TextBlock Grid.Row="1"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="卸载 = 对方案内全部曲目复原原始字节" />
+                                      Text="卸载后恢复原曲。" />
                     </Grid>
                 </ui:CardExpander.Header>
                 <Grid Margin="16">
@@ -199,7 +199,7 @@
                         <ui:TextBlock Grid.Row="0" FontTypography="Body" Text="导出方案" />
                         <ui:TextBlock Grid.Row="1"
                                       Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                      Text="把当前活动补丁打包为 .qxbgmzip（wem 内置，接收方免编码）" />
+                                      Text="将已替换的音乐打包分享。" />
                     </Grid>
                 </ui:CardExpander.Header>
                 <StackPanel>

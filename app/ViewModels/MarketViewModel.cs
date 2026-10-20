@@ -161,7 +161,7 @@ public partial class MarketViewModel : ObservableObject
                 var entry = SchemeService.FindTarget(t, AppState.Library)
                             ?? throw new SchemeException($"目标条目不在曲库：fileID {t.Target.FileId}");
                 var r = await SchemeService.InstallTrackAsync(manifest, t, entry, packageZip, baseUri,
-                    _encoder, Log, CancellationToken.None);
+                    _encoder, Log, CancellationToken.None, p => App.Dispatch(() => row.Detail = p.DisplayText));
                 if (r != null) { installed.Tracks.Add(r); patched++; }
                 else skipped++;
             }

@@ -26,9 +26,9 @@
 | 页面 | 能力 |
 |---|---|
 | 🔍 **环境检查** | 首次启动逐项体检：游戏目录 / Python / numpy / ffmpeg / 曲名映射 / WebView2 |
-| 🎼 **曲库** | 官方 188 轨全量浏览：分类（探索/战斗/任务/其他）、搜索、筛选、排序、**离线试听** |
+| 🎼 **曲库** | 官方 188 轨全量浏览：分类、搜索、筛选、排序、**离线试听**；按可见区域渲染，切换分类复用视图 |
 | 🔄 **替换中心** | 单条或批量"编码 → 容量校验 → 打入补丁"，支持热替换（游戏运行中生效） |
-| 🛠️ **编码转换** | 任意音频 ↔ PTADPCM wem 互转、pck 条目抽取 |
+| 🛠️ **编码转换** | 任意音频 ↔ PTADPCM wem 互转、pck 条目抽取；显示百分比、耗时与预计剩余时间，支持取消 |
 | 🛒 **方案市场** | 订阅索引仓库，一键安装/升级/卸载他人分享的 BGM 方案 |
 | 📦 **方案管理** | 导入/导出 `.qxbgmzip` 方案包，本地安装登记与卸载 |
 | 🌐 **奇域浏览** | 内嵌浏览器 + 奇域档案登记（为"按奇域 ID 关联方案"储备） |
@@ -55,15 +55,27 @@ git clone https://github.com/crt106/QxBgmManager.git
 cd QxBgmManager
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1   # 便携 .NET SDK + numpy
 vendor\dotnet\dotnet.exe build app\QxBgmManager.sln          # 构建
-vendor\dotnet\dotnet.exe run --project app\Tests\SchemeTests # 自测（54 项）
+vendor\dotnet\dotnet.exe run --project app\Tests\SchemeTests # 方案、备份与转码自测
+python app\Tests\codec_regression.py                        # 编码字节一致性、解码一致性与速度对照
+vendor\dotnet\dotnet.exe run --project app\Tests\UiTests     # WPF 布局、滚轮与页面进度检查
 ```
+
+基础自测自行生成静音 WEM 和音频，不依赖研究目录里的音乐文件。真实转码检查需要配置 Python、NumPy 和 ffmpeg；曲库窗口检查需要有效的游戏路径，缺少对应环境时会明确输出 `SKIP`。窗口检查会创建临时测试窗口，备份与恢复测试使用合成 PCK，均不修改游戏音乐包。截图及编码速度报告输出到 `build/verification/`，不入库。
+
+自包含单文件发布：
+
+```powershell
+vendor\dotnet\dotnet.exe publish app\QxBgmManager.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o app\publish
+```
+
+本次修复了导航容器导致的全量布局、矮窗口滚动和内层列表的滚轮传递，并精简界面文案。编码改为独立帧批量计算，保留 beam64 参数；24000 个合成单声道采样的编码核心对照约快 2.5 倍，输出逐字节一致，实际整曲耗时取决于机器与音频长度。
 
 ## 🧠 技术原理（简述）
 
 - 千星奇域音乐库位于客户端 `AudioAssets/BeyondUGC/BeydMusic0-7.pck`（Wwise AKPK 容器，共 188 轨）。
 - 本工具自研 **PTADPCM**（Wwise 2019.1+ 私有 ADPCM，fmt tag 0x8311）编解码器：
-  解码与 vgmstream 逐样本一致；编码为 beam-search 逐帧最优 nibble 搜索。
-- 替换 = 原位写入 + LUT 索引表更新 + 外科式备份，可字节级复原。
+  解码与 vgmstream 逐样本一致；编码为逐帧束搜索，并按独立帧批量计算。
+- 替换前先持久化原音频备份并原子提交清单，再写入音频与 LUT 索引；恢复校验通过后才清理记录，可字节级复原。
 - 流式音乐每次播放从磁盘重读 → **热替换**，游戏运行中打入即生效。
 
 详见 [`docs/QXBGM_SCHEME.md`](docs/QXBGM_SCHEME.md)（方案格式规范）与
@@ -83,7 +95,7 @@ vendor\dotnet\dotnet.exe run --project app\Tests\SchemeTests # 自测（54 项�
 - [x] PTADPCM 自研编解码（beam64，8bit 6kHz 低通预设）
 - [x] 方案格式 qxbgm/v1 与 git 中心化分发体系
 - [ ] TH01（东方灵异传）全关卡 BGM 包
-- [ ] 编码器性能优化（当前约 2.5~3× 音频时长）
+- [x] 编码器批量计算、实时进度与取消
 - [ ] 索引仓库 CI 自动化（Actions）
 
 ## 🤝 贡献

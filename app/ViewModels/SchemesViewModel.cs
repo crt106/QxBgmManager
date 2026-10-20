@@ -22,6 +22,7 @@ public partial class SchemesViewModel : ObservableObject
     [ObservableProperty] private bool _isExecuting;
     [ObservableProperty] private int _doneCount;
     [ObservableProperty] private int _totalCount;
+    [ObservableProperty] private double _executeProgress;
     [ObservableProperty] private string _executeStatus = "";
     [ObservableProperty] private string _wonderPrompt = "";
 
@@ -125,8 +126,8 @@ public partial class SchemesViewModel : ObservableObject
             Tracks = new ObservableCollection<SchemeTrackRow>(rows);
             ManifestLoaded = true;
             ExecuteStatus = _packageZip != null
-                ? "已读取方案包（音频内置）。勾选曲目后点「执行」安装。"
-                : "已读取方案清单。勾选曲目后点「执行」：将按需下载音频并编码。";
+                ? "已读取方案包，勾选曲目后安装。"
+                : "已读取方案，勾选曲目后安装。";
             Log("已打开方案 " + file);
         }
         catch (Exception ex)
@@ -154,6 +155,7 @@ public partial class SchemesViewModel : ObservableObject
         _cts = new CancellationTokenSource();
         IsExecuting = true;
         DoneCount = 0;
+        ExecuteProgress = 0;
         TotalCount = selected.Count;
         var installed = new InstalledScheme
         {
@@ -185,6 +187,7 @@ public partial class SchemesViewModel : ObservableObject
                     failed++;
                 }
                 DoneCount++;
+                ExecuteProgress = DoneCount * 100.0 / TotalCount;
             }
 
             if (installed.Tracks.Count > 0)
@@ -249,7 +252,11 @@ public partial class SchemesViewModel : ObservableObject
             wemPath = SchemeService.RawWemPath(manifest.Id, t);
             var preset = t.Encode?.Preset ?? "normal";
             int rc = await _encoder.EncodeAsync(audioPath, wemPath, PresetService.HzForPreset(preset),
-                _ => { }, ct, loop: t.Encode?.Loop ?? false);
+                Log, ct, loop: t.Encode?.Loop ?? false, onProgress: p => App.Dispatch(() =>
+                {
+                    row.Detail = p.DisplayText;
+                    ExecuteProgress = (DoneCount + p.Percent / 100) * 100 / Math.Max(1, TotalCount);
+                }));
             if (rc != 0 || !File.Exists(wemPath))
                 throw new InvalidOperationException("编码失败（退出码 " + rc + "）");
         }
@@ -272,11 +279,12 @@ public partial class SchemesViewModel : ObservableObject
         // 4. 写入补丁（已 patched 的跳过）
         if (PckService.IsEntryPatched(entry.PckPath, entry.FileId))
         {
-            row.Phase = "跳过（已补丁）";
-            row.Detail = "该条目已处于补丁状态，未重复写入";
+            row.Phase = "跳过（已替换）";
+            row.Detail = "请先恢复原曲，再安装方案";
             return;
         }
-        row.Phase = "写入补丁…";
+        ct.ThrowIfCancellationRequested();
+        row.Phase = "正在替换…";
         await Task.Run(() => PckService.Patch(entry.PckPath, entry.FileId, wemPath), ct);
         installedTracks.Add(new InstalledTrack
         {
@@ -412,10 +420,11 @@ public partial class SchemeTrackRow : ObservableObject
     public SchemeTrack Track { get; }
     public uint FileId => Track.Target.FileId;
     public string RefName { get; }
-    public string KindText => Track.Audio.Kind == SchemeService.KindWem ? "wem 直接注入" : "raw 需编码";
+    public string KindText => Track.Audio.Kind == SchemeService.KindWem ? "直接安装" : "安装时转码";
     public string PresetText => Track.Audio.Kind == SchemeService.KindWem
         ? "—"
-        : (Track.Encode?.Preset ?? "normal") + (Track.Encode?.Loop == true ? " +loop" : "");
+        : (PresetService.GetPresets().FirstOrDefault(p => p.Id == (Track.Encode?.Preset ?? "normal"))?.Name ?? "普通音乐")
+          + (Track.Encode?.Loop == true ? "，全曲循环" : "");
     /// <summary>打开方案时的当前条目状态。</summary>
     public string EntryStatus { get; }
 
@@ -434,7 +443,7 @@ public partial class SchemeTrackRow : ObservableObject
         RefName = refName;
         Entry = entry;
         EntryStatus = entry == null ? "✗ 不在曲库" :
-            PckService.IsEntryPatched(entry.PckPath, entry.FileId) ? "已补丁" : "空闲";
+            PckService.IsEntryPatched(entry.PckPath, entry.FileId) ? "已替换" : "原曲";
         if (entry == null) Selected = false;
     }
 }

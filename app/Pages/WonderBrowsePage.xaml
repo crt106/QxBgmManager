@@ -1,4 +1,4 @@
-<Page x:Class="QxBgmManager.Pages.WonderBrowsePage"
+<Page x:Class="QxBgmManager.Pages.WonderBrowsePage" Style="{StaticResource {x:Type Page}}"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -47,7 +47,7 @@
             <ui:TextBox Grid.Column="3" x:Name="AddressBox"
                         Text="{Binding AddressText, UpdateSourceTrigger=PropertyChanged}"
                         KeyDown="AddressBox_KeyDown"
-                        PlaceholderText="输入 URL 或关键词（关键词走必应搜索）" />
+                        PlaceholderText="输入网址或搜索关键词" />
             <ui:Button Grid.Column="4" Content="前往" Margin="6,0,0,0"
                        Command="{Binding GoCommand}" />
         </Grid>
@@ -118,7 +118,7 @@
                     <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="奇域档案" />
                     <ui:TextBlock Grid.Row="1" Grid.Column="0"
                                   Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                  Text="{Binding ArchiveStatus, FallbackValue=本地登记表：奇域ID / 名称 / 链接 / 备注 / 关联方案ID，供后续按奇域关联 BGM 方案}" />
+                                  Text="{Binding ArchiveStatus}" />
                     <ui:Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" Margin="0,0,6,0"
                                Content="从当前网页登记" Command="{Binding RegisterFromWebCommand}" />
                     <ui:Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Margin="0,0,6,0"
@@ -137,7 +137,7 @@
                           AutoGenerateColumns="False" IsReadOnly="False" CanUserAddRows="False"
                           SelectionMode="Single" SelectionUnit="FullRow"
                           GridLinesVisibility="Horizontal" HeadersVisibility="Column" RowHeaderWidth="0"
-                          Background="Transparent" BorderThickness="0" MaxHeight="220"
+                          Background="Transparent" BorderThickness="0" MaxHeight="160"
                           Foreground="{DynamicResource TextFillColorPrimaryBrush}">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="奇域ID" Binding="{Binding Id}" Width="110" />

@@ -14,10 +14,9 @@ void Check(bool ok, string msg)
     if (!ok) failures++;
 }
 
-// 定位工作区根（含 tools\ptadpcm_enc.py）与自测用 wem
-string root = FindWorkspaceRoot();
-string wemPath = Path.Combine(root, "build", "bgm-inject-research", "youkai_komachi_v2.wem");
-Check(File.Exists(wemPath), $"自测 wem 存在：{wemPath}");
+using var fixture = new TestAudioFixture();
+string wemPath = fixture.WemPath;
+Check(File.Exists(wemPath), "已生成合成静音 WEM 测试数据");
 string wemHash = await SchemeService.Sha256FileAsync(wemPath);
 long wemSize = new FileInfo(wemPath).Length;
 
@@ -348,7 +347,7 @@ string e2eDir = Path.Combine(Path.GetTempPath(), "qxbgm-baseuri-e2e-" + Guid.New
 try
 {
     Directory.CreateDirectory(Path.Combine(e2eDir, "audio"));
-    string srcWem = Path.Combine(root, "build", "bgm-inject-research", "youkai_komachi_v2.wem");
+    string srcWem = wemPath;
     string relAudio = Path.Combine(e2eDir, "audio", "komachi.wem");
     File.Copy(srcWem, relAudio);
     string localJson = JsonSerializer.Serialize(new
@@ -501,17 +500,10 @@ Check(script.Contains("del /q \"%~f0\""),
 Check(script.Contains(testPid.ToString()) && script.Contains(testNew),
     "更新脚本：PID 与新 exe 路径注入正确");
 
+PckSafetyTests.Run(Check);
+await EncodeServiceTests.Run(Check);
 Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILURES");
 return failures;
-
-static string FindWorkspaceRoot()
-{
-    var dir = new DirectoryInfo(AppContext.BaseDirectory);
-    for (int i = 0; i < 10 && dir != null; i++, dir = dir.Parent)
-        if (File.Exists(Path.Combine(dir.FullName, "tools", "ptadpcm_enc.py")))
-            return dir.FullName;
-    return @"D:\ProgramSource2\th01_BeyondLocal";
-}
 
 // 按规范手工造一个 .qxbgmzip（manifest.json + audio/），与 SchemeService.ExportSchemeZip 产物格式一致
 static async Task CreateZipManually(string zipPath, SchemeManifest manifest, string wemPath)
