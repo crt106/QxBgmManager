@@ -113,6 +113,44 @@
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
             </ui:NavigationView.FooterMenuItems>
+            <ui:NavigationView.ContentOverlay>
+                <!-- 新版本提示（BetterGI 兑换码通知卡同款版式）：点击跳转设置页更新卡片 -->
+                <Border x:Name="UpdateBanner"
+                        MinWidth="220"
+                        Margin="0,8,12,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        CornerRadius="8"
+                        Cursor="Hand"
+                        MouseLeftButtonDown="UpdateBanner_Click"
+                        Visibility="Collapsed">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="16" Opacity="0.2" ShadowDepth="2" />
+                    </Border.Effect>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="4" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0"
+                                Background="{DynamicResource SystemAccentColorPrimaryBrush}"
+                                CornerRadius="4,0,0,4" />
+                        <Border Grid.Column="1"
+                                Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                                Padding="14,10">
+                            <StackPanel>
+                                <TextBlock FontSize="13" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                                    <Run Text="🎁 发现新版本 v" /><Run x:Name="UpdateBannerVersion" Text="" />
+                                </TextBlock>
+                                <TextBlock Margin="0,2,0,0" FontSize="12"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Text="点击查看更新详情" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+            </ui:NavigationView.ContentOverlay>
         </ui:NavigationView>
     </Grid>
 </ui:FluentWindow>

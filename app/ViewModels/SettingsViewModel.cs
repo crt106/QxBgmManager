@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QxBgmManager.Services;
@@ -12,6 +13,18 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _pythonPath = "";
     [ObservableProperty] private string _registrySource = "";
     [ObservableProperty] private bool _themeDark = true;
+
+    // ---- 自动更新 ----
+    [ObservableProperty] private string _appVersionText = "";
+    [ObservableProperty] private bool _isCheckingUpdate;
+    [ObservableProperty] private bool _updateAvailable;
+    [ObservableProperty] private string _updateVersionText = "";
+    [ObservableProperty] private string _updateBodyText = "";
+    [ObservableProperty] private bool _isDownloading;
+    [ObservableProperty] private double _downloadPercent = -1;
+    [ObservableProperty] private string _updateStatus = "未检查";
+    private UpdateInfo? _pendingUpdate;
+    private CancellationTokenSource? _downloadCts;
 
     [ObservableProperty] private bool _gameRootOk;
     [ObservableProperty] private string _gameRootStatus = "未校验";
@@ -36,6 +49,7 @@ public partial class SettingsViewModel : ObservableObject
             ? @"https://github.com/crt106/qxbgm-registry.git"
             : s.RegistrySource;
         ThemeDark = s.ThemeDark;
+        AppVersionText = UpdateService.CurrentVersion;
         ValidateGameRoot();
     }
 
@@ -93,6 +107,82 @@ public partial class SettingsViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenEnvCheck() => OpenEnvCheckRequested?.Invoke();
+
+    // ---- 自动更新 ----
+
+    [RelayCommand]
+    private async Task CheckUpdateAsync()
+    {
+        if (IsCheckingUpdate) return;
+        IsCheckingUpdate = true;
+        UpdateAvailable = false;
+        UpdateStatus = "检查中…";
+        try
+        {
+            var info = await UpdateService.CheckAsync();
+            if (!string.IsNullOrEmpty(info.Error))
+            {
+                UpdateStatus = "检查失败：" + info.Error;
+            }
+            else if (info.HasUpdate)
+            {
+                _pendingUpdate = info;
+                UpdateAvailable = true;
+                UpdateVersionText = info.Version;
+                UpdateBodyText = info.Body.Length > 500 ? info.Body[..500] + "…" : info.Body;
+                UpdateStatus = $"发现新版本 v{info.Version}（约 {info.Size / 1048576.0:F1} MB）";
+            }
+            else
+            {
+                UpdateStatus = "已是最新版本。";
+            }
+        }
+        finally
+        {
+            IsCheckingUpdate = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task DownloadAndUpdateAsync()
+    {
+        if (_pendingUpdate == null || IsDownloading) return;
+        _downloadCts = new CancellationTokenSource();
+        IsDownloading = true;
+        DownloadPercent = 0;
+        UpdateStatus = "下载中…";
+        try
+        {
+            string path = await UpdateService.DownloadAsync(_pendingUpdate,
+                new Progress<(long Done, long Total)>(p =>
+                    DownloadPercent = p.Total > 0 ? p.Done * 100.0 / p.Total : DownloadPercent),
+                _downloadCts.Token);
+            IsDownloading = false;
+            DownloadPercent = 100;
+            var answer = MessageBox.Show("下载完成，将重启完成更新。现在重启？",
+                "更新", MessageBoxButton.YesNo, MessageBoxImage.Information);
+            if (answer == MessageBoxResult.Yes)
+            {
+                string? error = UpdateService.ApplyAndRestart(path);
+                if (error != null) UpdateStatus = error;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            UpdateStatus = "下载已取消。";
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus = "下载失败：" + ex.Message;
+        }
+        finally
+        {
+            IsDownloading = false;
+        }
+    }
+
+    [RelayCommand]
+    private void CancelDownload() => _downloadCts?.Cancel();
 
     [RelayCommand]
     private void Save()

@@ -453,6 +453,41 @@ finally
     try { Directory.Delete(sharedDir, true); } catch { }
 }
 
+// ---- 10. 自动更新：版本解析 / 更新判定 / 自更新脚本 ----
+Check(UpdateService.ParseVersion("v1.2.0") == "1.2.0"
+      && UpdateService.ParseVersion("1.2.0") == "1.2.0"
+      && UpdateService.ParseVersion("v1.2.0-beta") == "1.2.0"
+      && UpdateService.ParseVersion("release-2.0.1") == "2.0.1"
+      && UpdateService.ParseVersion("V10.20.30") == "10.20.30",
+    "版本解析：v 前缀/后缀/杂文本前缀容错");
+Check(UpdateService.ParseVersion("") == null && UpdateService.ParseVersion(null) == null
+      && UpdateService.ParseVersion("latest") == null && UpdateService.ParseVersion("v.x.y") == null,
+    "版本解析：无法解析返回 null");
+Check(RegistryService.CompareVersions("1.2.0", UpdateService.ParseVersion("v1.2.0")!) == 0,
+    "ParseVersion 输出与 CompareVersions 兼容");
+// 更新判定：当前 1.1.0
+Check(RegistryService.CompareVersions("1.2.0", "1.1.0") > 0, "当前 1.1.0 vs latest 1.2.0 → 有更新");
+Check(RegistryService.CompareVersions("1.1.0", "1.1.0") == 0, "当前 1.1.0 vs latest 1.1.0 → 无更新");
+Check(RegistryService.CompareVersions("1.0.9", "1.1.0") < 0, "当前 1.1.0 vs latest 1.0.9 → 无更新");
+
+// 自更新脚本内容
+const int testPid = 4242;
+string testExe = @"D:\app\QxBgmManager.exe";
+string testNew = @"C:\Temp\QxBgmManager_new.exe";
+var script = UpdateService.BuildUpdateScript(testPid, testExe, testNew);
+Check(script.Contains($"PID eq {testPid}") && script.Contains("goto wait"),
+    "更新脚本：包含 PID 等待循环");
+Check(script.Contains($"copy /y \"{testExe}\" \"{testExe}.bak\""),
+    "更新脚本：包含旧 exe 备份（.bak）");
+Check(script.Contains($"copy /y \"{testNew}\" \"{testExe}\""),
+    "更新脚本：包含新 exe 替换");
+Check(script.Contains($"start \"\" \"{testExe}\""),
+    "更新脚本：包含重启 exe");
+Check(script.Contains("del /q \"%~f0\""),
+    "更新脚本：包含自删");
+Check(script.Contains(testPid.ToString()) && script.Contains(testNew),
+    "更新脚本：PID 与新 exe 路径注入正确");
+
 Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILURES");
 return failures;
 

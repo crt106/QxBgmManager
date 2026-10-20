@@ -35,5 +35,29 @@ public partial class MainWindow : FluentWindow
                 nav.IsActive = nav.TargetPageType == pageType;
         }
         RootNavigation.Navigate(pageType);
+
+        // 首次进入主菜单后后台静默检查更新（有新版出横幅，失败静默）
+        if (pageType == typeof(Pages.LibraryPage))
+            SilentCheckUpdateAsync();
+    }
+
+    private bool _updateChecked;
+
+    private async void SilentCheckUpdateAsync()
+    {
+        if (_updateChecked) return;
+        _updateChecked = true;
+        var info = await Services.UpdateService.CheckAsync();
+        if (!info.HasUpdate) return;
+        Dispatcher.Invoke(() =>
+        {
+            UpdateBannerVersion.Text = info.Version;
+            UpdateBanner.Visibility = Visibility.Visible;
+        });
+    }
+
+    private void UpdateBanner_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        NavigateTo(typeof(Pages.SettingsPage));
     }
 }

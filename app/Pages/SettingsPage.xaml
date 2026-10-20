@@ -175,6 +175,68 @@
                 </Grid>
             </ui:CardControl>
 
+            <!-- 更新 -->
+            <ui:CardExpander Margin="0,0,0,12" ContentPadding="0" Icon="{ui:SymbolIcon ArrowSync24}">
+                <ui:CardExpander.Header>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="更新" />
+                        <ui:TextBlock Grid.Row="1" Grid.Column="0"
+                                      Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                      Text="{Binding UpdateStatus}" />
+                        <StackPanel Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" Margin="0,0,36,0"
+                                    VerticalAlignment="Center" Orientation="Horizontal">
+                            <TextBlock VerticalAlignment="Center" Margin="0,0,12,0"
+                                       Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}">
+                                <Run Text="当前版本 v" /><Run Text="{Binding AppVersionText}" />
+                            </TextBlock>
+                            <ui:Button Content="检查更新" Command="{Binding CheckUpdateCommand}"
+                                       IsEnabled="{Binding IsCheckingUpdate, Converter={StaticResource InverseBool}}" />
+                        </StackPanel>
+                    </Grid>
+                </ui:CardExpander.Header>
+                <StackPanel Visibility="{Binding UpdateAvailable, Converter={StaticResource BoolToVis}}">
+                    <Grid Margin="16,8,16,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <ui:TextBlock Grid.Row="0" FontTypography="Body">
+                            <Run Text="新版本 v" /><Run Text="{Binding UpdateVersionText}" />
+                        </ui:TextBlock>
+                        <TextBlock Grid.Row="1" Margin="0,6,36,0" MaxHeight="120" TextWrapping="Wrap"
+                                   ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="{Binding UpdateBodyText}" />
+                        <Grid Grid.Row="2" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ProgressBar Grid.Column="0" Minimum="0" Maximum="100" Height="6" Margin="0,0,12,0"
+                                         Value="{Binding DownloadPercent}"
+                                         Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}" />
+                            <ui:Button Grid.Column="1" Content="下载并更新" Appearance="Primary"
+                                       Command="{Binding DownloadAndUpdateCommand}"
+                                       IsEnabled="{Binding IsDownloading, Converter={StaticResource InverseBool}}" />
+                            <ui:Button Grid.Column="2" Content="取消" Margin="6,0,36,0"
+                                       Command="{Binding CancelDownloadCommand}"
+                                       IsEnabled="{Binding IsDownloading}" />
+                        </Grid>
+                    </Grid>
+                    <Grid Margin="16,0,16,16" />
+                </StackPanel>
+            </ui:CardExpander>
+
             <!-- 外观 -->
             <ui:CardControl Margin="0,0,0,12" Icon="{ui:SymbolIcon Image24}">
                 <ui:CardControl.Header>

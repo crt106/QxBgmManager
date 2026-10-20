@@ -9,7 +9,7 @@
     <AssemblyName>QxBgmManager</AssemblyName>
     <RootNamespace>QxBgmManager</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Description>千星BGM替换管理器 - 千星奇域曲库试听与 BGM 原位替换补丁管理</Description>
   </PropertyGroup>
 
