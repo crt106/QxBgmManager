@@ -1,0 +1,13 @@
+# build outputs
+app/bin/
+app/obj/
+app/publish/
+app/Tests/*/bin/
+app/Tests/*/obj/
+# 运行时数据（本机路径/安装登记/缓存，不入库）
+app/data/
+# 本地工具链（setup 脚本自动准备）
+vendor/
+# 临时与缓存
+build/
+*.user

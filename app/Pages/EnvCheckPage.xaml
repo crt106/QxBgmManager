@@ -1,0 +1,94 @@
+<Page x:Class="QxBgmManager.Pages.EnvCheckPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:vm="clr-namespace:QxBgmManager.ViewModels"
+      xmlns:services="clr-namespace:QxBgmManager.Services"
+      Title="环境检查"
+      d:DataContext="{d:DesignInstance Type=vm:EnvCheckViewModel}"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      mc:Ignorable="d"
+      ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+      ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      FontFamily="{StaticResource TextThemeFontFamily}"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  Background="{DynamicResource ApplicationBackgroundBrush}">
+        <StackPanel Margin="{StaticResource PagePadding}" MaxWidth="860">
+            <TextBlock Margin="0,0,0,12" FontSize="18" FontWeight="SemiBold" Text="环境检查" />
+            <TextBlock Margin="0,0,0,12"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                       Text="首次启动先确认运行环境。● 为关键项，全部通过后才能进入主菜单；○ 缺失仅影响对应功能。" />
+
+            <ui:CardControl Margin="0,0,0,12" Icon="{ui:SymbolIcon DeveloperBoard24}">
+                <ui:CardControl.Header>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBlock Grid.Column="0" FontTypography="Body" Text="{Binding SummaryText}" />
+                        <ui:Button Grid.Column="1" Margin="0,0,36,0" Content="重新检查"
+                                   Command="{Binding RunAllCommand}"
+                                   IsEnabled="{Binding IsChecking, Converter={StaticResource InverseBool}}" />
+                    </Grid>
+                </ui:CardControl.Header>
+            </ui:CardControl>
+
+            <ListBox ItemsSource="{Binding Items}" BorderThickness="0" Background="Transparent">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type services:EnvCheckItem}">
+                        <Grid Height="44">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="34" />
+                                <ColumnDefinition Width="30" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <!-- 状态：转圈 / ✓ / ! / ✗ -->
+                            <ui:ProgressRing Grid.Column="0" Width="16" Height="16" IsIndeterminate="True"
+                                             Visibility="{Binding Status, Converter={StaticResource EnumStatusToVis},
+                                                          ConverterParameter=Running}" />
+                            <TextBlock Grid.Column="0" Text="✓" FontSize="15" FontWeight="Bold" Foreground="#6EE7B7"
+                                       VerticalAlignment="Center" HorizontalAlignment="Center"
+                                       Visibility="{Binding Status, Converter={StaticResource EnumStatusToVis},
+                                                    ConverterParameter=Pass}" />
+                            <TextBlock Grid.Column="0" Text="!" FontSize="15" FontWeight="Bold" Foreground="#F2C94C"
+                                       VerticalAlignment="Center" HorizontalAlignment="Center"
+                                       Visibility="{Binding Status, Converter={StaticResource EnumStatusToVis},
+                                                    ConverterParameter=Warn}" />
+                            <TextBlock Grid.Column="0" Text="✗" FontSize="15" FontWeight="Bold" Foreground="#F27A7A"
+                                       VerticalAlignment="Center" HorizontalAlignment="Center"
+                                       Visibility="{Binding Status, Converter={StaticResource EnumStatusToVis},
+                                                    ConverterParameter=Fail}" />
+                            <!-- 级别 -->
+                            <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Text="{Binding Level, Converter={StaticResource EnumLevelToText}}" />
+                            <!-- 名称 + 说明 -->
+                            <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="4,0">
+                                <TextBlock Text="{Binding Name}"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                <TextBlock Text="{Binding Detail}" FontSize="12" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                            <!-- 修复按钮 -->
+                            <ui:Button Grid.Column="3" Margin="0,0,8,0" Content="去设置" Padding="10,3"
+                                       Visibility="{Binding Fix, Converter={StaticResource EnumFixToVis},
+                                                    ConverterParameter=OpenSettings}"
+                                       Command="{Binding DataContext.FixItemCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                       CommandParameter="{Binding}" />
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <ui:Button Margin="0,16,0,0" Content="进入主菜单" Appearance="Primary" Padding="24,8"
+                       HorizontalAlignment="Left"
+                       Command="{Binding EnterMainCommand}"
+                       IsEnabled="{Binding CanEnter}" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>

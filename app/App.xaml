@@ -1,0 +1,37 @@
+<Application x:Class="QxBgmManager.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vio="http://schemas.lepo.co/wpfui/2022/xaml/violeta"
+             xmlns:conv="clr-namespace:QxBgmManager.Converters">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Dark" />
+                <ui:ControlsDictionary />
+                <vio:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- ===== 字体（对齐 BetterGI）===== -->
+            <FontFamily x:Key="TextThemeFontFamily">/Resources/Fonts/MiSans-Regular.ttf#MiSans</FontFamily>
+
+            <!-- ===== 设计令牌（对齐 BetterGI）===== -->
+            <CornerRadius x:Key="ControlCornerRadius">6</CornerRadius>
+            <Thickness x:Key="PagePadding">48,20,48,28</Thickness>
+
+            <!-- ===== 全局 Converter ===== -->
+            <conv:BoolToVisibilityConverter x:Key="BoolToVis" />
+            <conv:InverseBooleanConverter x:Key="InverseBool" />
+            <conv:StatusDotConverter x:Key="StatusDot" />
+            <conv:BoolToTextConverter x:Key="BoolToText" />
+            <conv:EnumMatchToVisibilityConverter x:Key="EnumStatusToVis" />
+            <conv:EnumMatchToVisibilityConverter x:Key="EnumFixToVis" />
+            <conv:EnvCheckLevelConverter x:Key="EnumLevelToText" />
+            <conv:BoolToWarnBrushConverter x:Key="BoolToWarnBrush" />
+
+            <Style TargetType="Page">
+                <Setter Property="Background" Value="{DynamicResource ApplicationBackgroundBrush}" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
