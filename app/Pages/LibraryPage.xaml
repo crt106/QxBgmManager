@@ -31,7 +31,8 @@
         <ListBox Grid.Row="1" Grid.Column="0"
                  ItemsSource="{Binding Categories}"
                  SelectedItem="{Binding SelectedCategory}"
-                 BorderThickness="0" Background="Transparent">
+                 BorderThickness="0" Background="Transparent"
+                 ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Grid Height="34">
@@ -108,19 +109,21 @@
                           VirtualizingPanel.IsVirtualizing="True"
                           VirtualizingPanel.VirtualizationMode="Recycling"
                           ScrollViewer.CanContentScroll="True"
+                          RowHeight="42"
                           Foreground="{DynamicResource TextFillColorPrimaryBrush}">
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="曲名" Width="2.2*">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
-                                    <StackPanel ToolTipService.ToolTip="{Binding TooltipText}" Margin="2,1">
-                                        <TextBlock Text="{Binding TrackName}" FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                                        <TextBlock Text="{Binding EnglishName}" FontSize="11"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                    </StackPanel>
+                                    <!-- 单行 TextBlock + Run 组合（省一层 StackPanel，软渲染下每行少一次布局） -->
+                                    <TextBlock ToolTipService.ToolTip="{Binding TooltipText}" Margin="2,1"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                                        <Run Text="{Binding TrackName, Mode=OneWay}" FontWeight="SemiBold" />
+                                        <LineBreak />
+                                        <Run Text="{Binding EnglishName, Mode=OneWay}" FontSize="11"
+                                             Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                    </TextBlock>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>

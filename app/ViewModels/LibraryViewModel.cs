@@ -51,12 +51,16 @@ public partial class LibraryViewModel : ObservableObject
     [RelayCommand]
     private async Task RefreshAsync()
     {
+        var swTotal = Stopwatch.StartNew();
         IsLoading = true;
         StatusText = "正在解析 8 个 BeydMusic pck…";
         try
         {
             var root = SettingsService.Current.GameRoot;
+            var sw = Stopwatch.StartNew();
             var (ok, message) = await AppState.EnsureLibraryAsync(root);
+            sw.Stop();
+            Debug.WriteLine($"[Perf] EnsureLibraryAsync: {sw.ElapsedMilliseconds} ms");
             if (!ok)
             {
                 _allRows.Clear();
@@ -65,16 +69,22 @@ public partial class LibraryViewModel : ObservableObject
                 return;
             }
 
+            sw.Restart();
             _allRows.Clear();
             foreach (var e in AppState.Library)
             {
                 var patched = AppState.PatchedIds(e.PckPath);
                 _allRows.Add(new TrackRow(e, AppState.InfoOf(e.FileId), patched.Contains(e.FileId)));
             }
+            sw.Stop();
+            Debug.WriteLine($"[Perf] 构建 {_allRows.Count} 个 TrackRow: {sw.ElapsedMilliseconds} ms");
+
             RebuildCategories();
             ApplyFilters();
             StatusText = $"{message}（{SettingsService.BeyondUgcDir(root)}）";
             OnPlaybackChanged();
+            swTotal.Stop();
+            Debug.WriteLine($"[Perf] RefreshAsync 总计（数据+VM 侧）: {swTotal.ElapsedMilliseconds} ms；渲染在 UI 线程另行发生");
         }
         catch (Exception ex)
         {

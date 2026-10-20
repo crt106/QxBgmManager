@@ -192,6 +192,19 @@ if (detectRoot != null)
     for (int i = 0; i < 300 && vm.AllRowsCount == 0; i++) await Task.Delay(50);
     Check(vm.AllRowsCount == 188, $"曲库 VM 加载 {vm.AllRowsCount} 行");
 
+    // 数据加载（pck 解析 + 映射）与行 VM 构建的 VM 侧分布
+    var swLoad = Stopwatch.StartNew();
+    var (loadOk, _) = await AppState.EnsureLibraryAsync(detectRoot, force: true);
+    swLoad.Stop();
+    var swBuild = Stopwatch.StartNew();
+    var builtRows = AppState.Library
+        .Select(e => new QxBgmManager.ViewModels.TrackRow(e, AppState.InfoOf(e.FileId),
+            AppState.PatchedIds(e.PckPath).Contains(e.FileId)))
+        .ToList();
+    swBuild.Stop();
+    Console.WriteLine($"      [Perf] VM 侧分布：pck 解析+映射 {swLoad.ElapsedMilliseconds} ms（ok={loadOk}），"
+                      + $"188 行 TrackRow 构建 {swBuild.Elapsed.TotalMilliseconds:F1} ms（渲染/布局在 UI 线程，软渲染下另行发生）");
+
     var cats = vm.Categories.ToList();
     // 预热（JIT + 首次绑定）
     foreach (var c in cats) vm.SelectedCategory = c;

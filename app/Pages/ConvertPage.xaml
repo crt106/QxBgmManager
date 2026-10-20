@@ -45,7 +45,8 @@
                                        Command="{Binding BrowseOutDirCommand}" CommandParameter="encode" />
                         </StackPanel>
                     </Grid>
-                    <ListBox Margin="16" Height="150" AllowDrop="True"
+                    <ListBox Margin="16" MinHeight="90" MaxHeight="220" AllowDrop="True"
+                             ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ItemsSource="{Binding AudioJobs}"
                              Drop="AudioList_Drop"
                              Background="{DynamicResource ControlFillColorSecondaryBrush}"
@@ -107,7 +108,8 @@
                                        Command="{Binding BrowseOutDirCommand}" CommandParameter="decode" />
                         </StackPanel>
                     </Grid>
-                    <ListBox Margin="16" Height="120" AllowDrop="True"
+                    <ListBox Margin="16" MinHeight="80" MaxHeight="200" AllowDrop="True"
+                             ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ItemsSource="{Binding WemJobs}"
                              Drop="WemList_Drop"
                              Background="{DynamicResource ControlFillColorSecondaryBrush}"

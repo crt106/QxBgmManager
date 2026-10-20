@@ -13,6 +13,8 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _pythonPath = "";
     [ObservableProperty] private string _registrySource = "";
     [ObservableProperty] private bool _themeDark = true;
+    /// <summary>实验：硬件渲染（重启生效）。</summary>
+    [ObservableProperty] private bool _renderHardware;
 
     // ---- 自动更新 ----
     [ObservableProperty] private string _appVersionText = "";
@@ -49,6 +51,7 @@ public partial class SettingsViewModel : ObservableObject
             ? @"https://github.com/crt106/qxbgm-registry.git"
             : s.RegistrySource;
         ThemeDark = s.ThemeDark;
+        RenderHardware = s.RenderHardware;
         AppVersionText = UpdateService.CurrentVersion;
         ValidateGameRoot();
     }
@@ -193,6 +196,7 @@ public partial class SettingsViewModel : ObservableObject
         s.PythonPath = PythonPath;
         s.RegistrySource = RegistrySource;
         s.ThemeDark = ThemeDark;
+        s.RenderHardware = RenderHardware;
         SettingsService.Save();
         ValidateGameRoot();
         GameRootStatus += "（已保存）";

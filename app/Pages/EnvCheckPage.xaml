@@ -36,7 +36,8 @@
                 </ui:CardControl.Header>
             </ui:CardControl>
 
-            <ListBox ItemsSource="{Binding Items}" BorderThickness="0" Background="Transparent">
+            <ListBox ItemsSource="{Binding Items}" BorderThickness="0" Background="Transparent"
+                     ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                 <ListBox.ItemTemplate>
                     <DataTemplate DataType="{x:Type services:EnvCheckItem}">
                         <Grid Height="44">

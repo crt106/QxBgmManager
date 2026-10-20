@@ -8,12 +8,12 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // 本机 NVIDIA 环境下 WPF 硬件渲染 + Mica 会出现整窗黑屏，先强制软件渲染兜底
-        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
-
         var settings = Services.SettingsService.Load();
         Services.SettingsService.Current = settings;
         ApplyTheme(settings.ThemeDark);
+        // 默认硬件渲染（Mica 已在 MainWindow 关闭以规避 NVIDIA 黑屏）；RenderHardware=false 时降级软件渲染兜底
+        if (!settings.RenderHardware)
+            System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
 
         var window = new MainWindow();
         window.Show();

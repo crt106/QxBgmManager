@@ -29,6 +29,16 @@
             <conv:EnvCheckLevelConverter x:Key="EnumLevelToText" />
             <conv:BoolToWarnBrushConverter x:Key="BoolToWarnBrush" />
 
+            <!-- ===== 选中态覆盖（问题3：App 刷了纯色 accent，WPF-UI 选中态直接用实底导致看不清）。
+                 放在 ControlsDictionary 之后，以低透明度 accent 底 + 主题自适应文字替换实底；
+                 悬停态模板用 SubtleFill（弱），天然比选中态更弱。主按钮 Accent 不受影响。 ===== -->
+            <SolidColorBrush x:Key="ListBoxItemSelectedBackgroundThemeBrush" Color="#2E6EE7B7" />
+            <SolidColorBrush x:Key="ListBoxItemSelectedForegroundThemeBrush" Color="{StaticResource TextFillColorPrimary}" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#2E6EE7B7" />
+            <Color x:Key="{x:Static SystemColors.HighlightColorKey}">#2E6EE7B7</Color>
+            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#226EE7B7" />
+            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="{StaticResource TextFillColorPrimary}" />
+
             <Style TargetType="Page">
                 <Setter Property="Background" Value="{DynamicResource ApplicationBackgroundBrush}" />
             </Style>

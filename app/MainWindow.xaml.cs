@@ -8,6 +8,9 @@ public partial class MainWindow : FluentWindow
     public MainWindow()
     {
         InitializeComponent();
+        // 硬件渲染实验：关闭 Backdrop（Mica/Auto 在部分 NVIDIA 驱动 + 硬件渲染下整窗黑屏）
+        if (Services.SettingsService.Current.RenderHardware)
+            WindowBackdropType = WindowBackdropType.None;
         Loaded += (_, _) =>
         {
             // 首次启动落地页：环境检查（通过后才进主菜单）

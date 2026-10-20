@@ -11,4 +11,6 @@ public class AppSettings
     /// <summary>方案市场索引源：本地索引仓库路径或 git URL（默认远端仓库；老用户已存的本地路径不覆盖）。</summary>
     public string RegistrySource { get; set; } = @"https://github.com/crt106/qxbgm-registry.git";
     public bool ThemeDark { get; set; } = true;
+    /// <summary>实验：硬件渲染（默认软件渲染兜底黑屏；硬件模式自动关 Backdrop）。重启生效。</summary>
+    public bool RenderHardware { get; set; } = true;
 }

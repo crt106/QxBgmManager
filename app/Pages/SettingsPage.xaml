@@ -274,6 +274,28 @@
                 </ui:CardControl.Header>
             </ui:CardControl>
 
+            <!-- 渲染模式（实验） -->
+            <ui:CardControl Margin="0,0,0,12" Icon="{ui:SymbolIcon Image24}">
+                <ui:CardControl.Header>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="硬件渲染" />
+                        <ui:TextBlock Grid.Row="1" Grid.Column="0"
+                                      Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                      Text="默认开启（GPU 渲染，更流畅，自动关闭窗口背景材质）。如遇黑屏请关闭（降级为软件渲染）。重启后生效。" />
+                        <ui:ToggleSwitch Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" Margin="0,0,36,0"
+                                         IsChecked="{Binding RenderHardware}" />
+                    </Grid>
+                </ui:CardControl.Header>
+            </ui:CardControl>
+
             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                 <ui:Button Content="保存设置" Command="{Binding SaveCommand}" Appearance="Primary"
                            Padding="20,6" Margin="0,0,8,0" />
