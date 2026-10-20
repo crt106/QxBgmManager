@@ -373,6 +373,86 @@ else
     Console.WriteLine("SKIP  P0 索引仓库不存在，跳过该断言");
 }
 
+// ---- 9. 共享配置中心化（registry 缓存 → 本地文件 → 种子） ----
+string sharedDir = Path.Combine(Path.GetTempPath(), "qxbgm-sharedcfg-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Directory.CreateDirectory(Path.Combine(sharedDir, "config"));
+    string localMap = Path.Combine(sharedDir, "track-map.json");
+    await File.WriteAllTextAsync(localMap,
+        """{"tracks":[{"index":90002,"name":"本地曲目","fileID":555002}]}""");
+
+    // 优先级 1：registry 共享缓存（连显式路径也让位）
+    AppState.SetSharedConfigs(new Dictionary<uint, TrackInfo>
+    {
+        [555001] = new TrackInfo { FileId = 555001, Name = "共享曲目", Index = 90001, Category = 101 },
+    }, null);
+    var viaShared = TrackMapService.Load(localMap);
+    Check(viaShared.ContainsKey(555001) && !viaShared.ContainsKey(555002) && !viaShared.ContainsKey(122217526),
+        "优先级1：registry 共享缓存覆盖本地文件与种子");
+    AppState.SetSharedConfigs(null, null);
+    // 优先级 2/3
+    var viaLocal = TrackMapService.Load(localMap);
+    Check(viaLocal.ContainsKey(555002) && viaLocal.ContainsKey(122217526),
+        "优先级2：无共享缓存时读本地文件，种子兜底");
+    var viaSeed = TrackMapService.Load(Path.Combine(sharedDir, "no-such.json"));
+    Check(viaSeed.Count == 2 && viaSeed.ContainsKey(122217526), "优先级3：文件缺失降级为仅种子");
+
+    // app-config 解析：全字段
+    await File.WriteAllTextAsync(Path.Combine(sharedDir, "config", "app-config.json"), """
+    {"kind":"app-config","minAppVersion":"1.0.0",
+     "encoder":{"sampleRate":48000,"channels":2,"beam":64},
+     "presets":[{"id":"normal","name":"普通","lowpassHz":0},{"id":"lp8k","name":"低通8k","lowpassHz":8000,"loop":true}],
+     "bookmarks":[{"title":"共享书签","url":"https://example.com"}],
+     "knownGameRoots":["C:\\Games"],"audio":{"bytesPerSecond":54000}}
+    """);
+    var cfg = RegistryService.LoadAppConfig(sharedDir);
+    Check(cfg is { Presets.Count: 2 } && cfg.Presets[1].LowpassHz == 8000 && cfg.Presets[1].Loop
+          && cfg.Bookmarks.Count == 1 && cfg.Bookmarks[0].Title == "共享书签"
+          && cfg.KnownGameRoots.Count == 1 && cfg.Encoder is { Beam: 64, SampleRate: 48000 },
+        "app-config 全字段解析（presets/bookmarks/knownGameRoots/encoder）");
+    // 缺字段回退
+    await File.WriteAllTextAsync(Path.Combine(sharedDir, "config", "app-config.json"),
+        """{"kind":"app-config","presets":[{"id":"p1"},{"name":"无名"}]}""");
+    var cfgMin = RegistryService.LoadAppConfig(sharedDir);
+    Check(cfgMin != null && cfgMin.Presets.Count == 2 && cfgMin.Presets[0].LowpassHz == 0 && !cfgMin.Presets[0].Loop
+          && cfgMin.Bookmarks.Count == 0 && cfgMin.Encoder == null && cfgMin.MinAppVersion == "",
+        "app-config 缺字段回退（lowpassHz=0/loop=false/空 bookmarks/无 encoder）");
+    // 容错：损坏 JSON / kind 不符 → null
+    await File.WriteAllTextAsync(Path.Combine(sharedDir, "config", "app-config.json"), "{broken");
+    Check(RegistryService.LoadAppConfig(sharedDir) == null, "app-config 损坏 JSON 容错为 null");
+    await File.WriteAllTextAsync(Path.Combine(sharedDir, "config", "app-config.json"), """{"kind":"other"}""");
+    Check(RegistryService.LoadAppConfig(sharedDir) == null, "app-config kind 不符忽略");
+    // LoadSharedTrackMap
+    await File.WriteAllTextAsync(Path.Combine(sharedDir, "config", "track-map.json"),
+        """{"tracks":[{"index":90002,"name":"本地曲目","fileID":555002}]}""");
+    var sm = RegistryService.LoadSharedTrackMap(sharedDir);
+    Check(sm is { Count: 1 } && sm.ContainsKey(555002), "LoadSharedTrackMap 读取索引仓库 config/track-map.json");
+
+    // PresetService：共享优先 + 回退
+    AppState.SetSharedConfigs(null, new AppConfig { Presets = { new EncoderPreset { Id = "lp4k", Name = "低通4k", LowpassHz = 4000 } } });
+    Check(PresetService.GetPresets().Count == 1 && PresetService.HzForPreset("lp4k") == 4000
+          && PresetService.HzForPreset("chiptune-6k") == 6000,
+        "PresetService 共享预设优先；未知 id 回退硬编码 chiptune-6k=6000Hz");
+    AppState.SetSharedConfigs(null, null);
+    Check(PresetService.GetPresets().Count == 2 && PresetService.HzForPreset("normal") == 0
+          && PresetService.HzForPreset("chiptune-6k") == 6000,
+        "PresetService 无共享配置回退硬编码两项");
+
+    // BookmarkService：共享优先；无共享时默认合并仍在
+    AppState.SetSharedConfigs(null, new AppConfig { Bookmarks = { new BrowserBookmark { Title = "共享书签B", Url = "https://shared.example" } } });
+    Check(BookmarkService.Load().Any(b => b.Url == "https://shared.example"),
+        "BookmarkService 共享书签优先");
+    AppState.SetSharedConfigs(null, null);
+    Check(BookmarkService.Load().Any(b => b.Url == "https://act.mihoyo.com/ys/ugc/tutorial"),
+        "BookmarkService 无共享时回退硬编码默认书签");
+}
+finally
+{
+    AppState.SetSharedConfigs(null, null);
+    try { Directory.Delete(sharedDir, true); } catch { }
+}
+
 Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILURES");
 return failures;
 

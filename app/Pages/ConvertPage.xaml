@@ -55,10 +55,8 @@
                                 <StackPanel Orientation="Horizontal" Margin="2">
                                     <TextBlock Text="{Binding FileName}" Width="340" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis" />
-                                    <ComboBox Width="130" Margin="8,0,0,0" SelectedIndex="{Binding PresetIndex}">
-                                        <ComboBoxItem Content="normal" />
-                                        <ComboBoxItem Content="chiptune-6k" />
-                                    </ComboBox>
+                                    <ComboBox Width="130" Margin="8,0,0,0" SelectedIndex="{Binding PresetIndex}"
+                                              ItemsSource="{Binding DataContext.PresetNames, RelativeSource={RelativeSource AncestorType=Page}}" />
                                     <CheckBox Content="loop" Margin="10,0,0,0" VerticalAlignment="Center"
                                               IsChecked="{Binding Loop}" />
                                     <TextBlock Text="{Binding Status}" Margin="12,0,0,0" VerticalAlignment="Center"

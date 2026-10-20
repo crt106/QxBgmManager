@@ -42,6 +42,16 @@ public partial class ConvertViewModel : ObservableObject
     public ObservableCollection<ConvertJob> Queue { get; } = new();
     public ObservableCollection<string> LogLines { get; } = new();
 
+    /// <summary>编码预设显示名（优先索引仓库 app-config.json，回退硬编码两项）。</summary>
+    public IReadOnlyList<string> PresetNames { get; } =
+        PresetService.GetPresets().Select(p => p.Name).ToList();
+
+    private static double HzForIndex(int index)
+    {
+        var presets = PresetService.GetPresets();
+        return index >= 0 && index < presets.Count ? presets[index].LowpassHz : 0;
+    }
+
     private CancellationTokenSource? _cts;
     private readonly EncodeService _runner = new();
 
@@ -228,7 +238,7 @@ public partial class ConvertViewModel : ObservableObject
                 string outWem = Path.Combine(EncodeOutDir,
                     Path.GetFileNameWithoutExtension(job.InputPath) + ".wem");
                 int rc = await _runner.EncodeAsync(job.InputPath, outWem,
-                    job.PresetIndex == 1, Log, ct, loop: job.Loop);
+                    HzForIndex(job.PresetIndex), Log, ct, loop: job.Loop);
                 if (rc != 0 || !File.Exists(outWem)) throw new InvalidOperationException("编码失败（退出码 " + rc + "）");
                 job.Status = "完成";
                 job.Detail = $"{new FileInfo(outWem).Length:N0} B → {outWem}";

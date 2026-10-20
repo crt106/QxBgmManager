@@ -33,7 +33,7 @@ public partial class SettingsViewModel : ObservableObject
         FfmpegPath = string.IsNullOrWhiteSpace(s.FfmpegPath) ? SettingsService.DefaultFfmpegPath : s.FfmpegPath;
         PythonPath = string.IsNullOrWhiteSpace(s.PythonPath) ? "python" : s.PythonPath;
         RegistrySource = string.IsNullOrWhiteSpace(s.RegistrySource)
-            ? @"D:\ProgramSource2\qxbgm-registry"
+            ? @"https://github.com/crt106/qxbgm-registry.git"
             : s.RegistrySource;
         ThemeDark = s.ThemeDark;
         ValidateGameRoot();

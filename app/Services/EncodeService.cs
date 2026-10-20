@@ -6,7 +6,7 @@ namespace QxBgmManager.Services;
 
 /// <summary>
 /// 编码/解码子进程封装（保留 Python 子进程调用）：
-/// encode = python tools\ptadpcm_enc.py encode（8bit 预设先 ffmpeg 6kHz 低通），
+/// encode = python tools\ptadpcm_enc.py encode（lowpassHz &gt; 0 时先 ffmpeg 低通），
 /// decode = python tools\ptadpcm_enc.py decode。onLine 在后台线程回调，需自行切 UI 线程。
 /// </summary>
 public class EncodeService
@@ -15,11 +15,11 @@ public class EncodeService
 
     public bool IsRunning => _process is { HasExited: false };
 
-    public Task<int> EncodeAsync(string sourcePath, string outWem, bool lowPass8Bit,
+    public Task<int> EncodeAsync(string sourcePath, string outWem, double lowPassHz,
         Action<string> onLine, CancellationToken ct, bool loop = false)
-        => RunEncodeAsync(sourcePath, outWem, lowPass8Bit, onLine, ct, loop);
+        => RunEncodeAsync(sourcePath, outWem, lowPassHz, onLine, ct, loop);
 
-    private async Task<int> RunEncodeAsync(string sourcePath, string outWem, bool lowPass8Bit,
+    private async Task<int> RunEncodeAsync(string sourcePath, string outWem, double lowPassHz,
         Action<string> onLine, CancellationToken ct, bool loop = false)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outWem))!);
@@ -27,12 +27,12 @@ public class EncodeService
         string? tmpWav = null;
         try
         {
-            if (lowPass8Bit)
+            if (lowPassHz > 0)
             {
-                tmpWav = Path.Combine(SettingsService.ResearchDir, "tmp_lowpass6k.wav");
-                onLine("[8bit 预设] ffmpeg 6kHz 低通滤波…");
+                tmpWav = Path.Combine(SettingsService.ResearchDir, $"tmp_lowpass{lowPassHz:0}.wav");
+                onLine($"[低通预设] ffmpeg {lowPassHz:0}Hz 低通滤波…");
                 int rc = await RunAsync(SettingsService.ResolveFfmpeg(),
-                    $"-y -hide_banner -i {Q(sourcePath)} -af lowpass=f=6000 {Q(tmpWav)}", onLine, ct);
+                    $"-y -hide_banner -i {Q(sourcePath)} -af lowpass=f={lowPassHz:0} {Q(tmpWav)}", onLine, ct);
                 if (rc != 0) throw new InvalidOperationException("ffmpeg 低通滤波失败（退出码 " + rc + "）");
                 input = tmpWav;
             }

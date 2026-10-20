@@ -29,6 +29,16 @@ public partial class ReplaceCenterViewModel : ObservableObject
 
     public ObservableCollection<string> LogLines { get; } = new();
 
+    /// <summary>编码预设显示名（优先索引仓库 app-config.json，回退硬编码两项）。</summary>
+    public IReadOnlyList<string> PresetNames { get; } =
+        PresetService.GetPresets().Select(p => p.Name).ToList();
+
+    private static double HzForIndex(int index)
+    {
+        var presets = PresetService.GetPresets();
+        return index >= 0 && index < presets.Count ? presets[index].LowpassHz : 0;
+    }
+
     private CancellationTokenSource? _cts;
     private readonly EncodeService _encoder = new();
     private readonly DispatcherTimer _gameWatch;
@@ -169,7 +179,7 @@ public partial class ReplaceCenterViewModel : ObservableObject
         var target = job.Target!;
         job.Status = "编码…";
         job.Detail = "";
-        int rc = await _encoder.EncodeAsync(job.SourcePath, job.WemPath, job.PresetIndex == 1,
+        int rc = await _encoder.EncodeAsync(job.SourcePath, job.WemPath, HzForIndex(job.PresetIndex),
             Log, ct);
         if (rc != 0 || !File.Exists(job.WemPath))
             throw new InvalidOperationException("编码失败（退出码 " + rc + "）");

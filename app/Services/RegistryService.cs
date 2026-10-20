@@ -144,6 +144,34 @@ public static class RegistryService
         return (entries, warnings);
     }
 
+    // ---- 共享配置（config/track-map.json 与 config/app-config.json）----
+
+    /// <summary>读取索引仓库 config/track-map.json；不存在/损坏/无条目返回 null（调用方降级）。</summary>
+    public static Dictionary<uint, TrackInfo>? LoadSharedTrackMap(string repoDir)
+    {
+        try
+        {
+            var file = Path.Combine(repoDir, "config", "track-map.json");
+            if (!File.Exists(file)) return null;
+            var map = TrackMapService.ParseTracksJson(File.ReadAllText(file));
+            return map.Count > 0 ? map : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>读取索引仓库 config/app-config.json；不存在/损坏/kind 不符返回 null。</summary>
+    public static AppConfig? LoadAppConfig(string repoDir)
+    {
+        try
+        {
+            var file = Path.Combine(repoDir, "config", "app-config.json");
+            if (!File.Exists(file)) return null;
+            var config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(file), JsonOpts);
+            return config is { Kind: "app-config" } ? config : null;
+        }
+        catch { return null; }
+    }
+
     // ---- 版本比较 ----
 
     /// <summary>语义化版本比较（点分数字，缺段补 0）：a&lt;b 返回负数，相等 0，a&gt;b 正数。</summary>

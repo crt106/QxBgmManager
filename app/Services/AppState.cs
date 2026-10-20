@@ -62,6 +62,20 @@ public static class AppState
     public static TrackInfo? InfoOf(uint fileId)
         => TrackMap.TryGetValue(fileId, out var info) ? info : null;
 
+    // ---- 索引仓库共享配置（RegistryService 同步后写入）----
+
+    /// <summary>索引仓库 config/track-map.json 的缓存副本；优先级高于本地研究目录文件。</summary>
+    public static Dictionary<uint, TrackInfo>? SharedTrackMap { get; private set; }
+
+    /// <summary>索引仓库 config/app-config.json 的缓存副本（预设/书签等）。</summary>
+    public static AppConfig? SharedConfig { get; private set; }
+
+    public static void SetSharedConfigs(Dictionary<uint, TrackInfo>? trackMap, AppConfig? config)
+    {
+        SharedTrackMap = trackMap is { Count: > 0 } ? trackMap : null;
+        SharedConfig = config;
+    }
+
     /// <summary>扫描 8 个 pck 的全部活动补丁。</summary>
     public static List<PatchInfo> ScanPatches(string gameRoot)
     {

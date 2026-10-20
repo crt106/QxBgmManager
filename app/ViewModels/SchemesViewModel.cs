@@ -248,7 +248,7 @@ public partial class SchemesViewModel : ObservableObject
             row.Detail = "";
             wemPath = SchemeService.RawWemPath(manifest.Id, t);
             var preset = t.Encode?.Preset ?? "normal";
-            int rc = await _encoder.EncodeAsync(audioPath, wemPath, preset == "chiptune-6k",
+            int rc = await _encoder.EncodeAsync(audioPath, wemPath, PresetService.HzForPreset(preset),
                 _ => { }, ct, loop: t.Encode?.Loop ?? false);
             if (rc != 0 || !File.Exists(wemPath))
                 throw new InvalidOperationException("编码失败（退出码 " + rc + "）");

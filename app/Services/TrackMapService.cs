@@ -5,10 +5,9 @@ using QxBgmManager.Models;
 namespace QxBgmManager.Services;
 
 /// <summary>
-/// fileID → 曲目信息映射。种子映射硬编码；若 build\bgm-inject-research\track-map.json 存在则加载
-/// （扩展格式含 index/name/fileID/pck/durationSec/category/categoryName/album；
-/// 兼容仅 index/name/fileID 的旧格式与 {"tracks":[...]} 包装；未知字段忽略）。
-/// 文件不存在或损坏时仅使用种子，全部未映射条目按「未识别」处理。
+/// fileID → 曲目信息映射。优先级：registry 共享缓存（索引仓库 config/track-map.json，由
+/// RegistryService 同步后写入 AppState.SharedTrackMap）→ 本地研究目录 track-map.json →
+/// 2 条硬编码种子。文件缺失/损坏按下一级降级，绝不抛异常。
 /// </summary>
 public static class TrackMapService
 {
@@ -29,34 +28,46 @@ public static class TrackMapService
 
     public static Dictionary<uint, TrackInfo> Load(string? mapFile = null)
     {
+        // 优先级 1：索引仓库共享缓存
+        if (AppState.SharedTrackMap is { Count: > 0 } shared)
+            return new Dictionary<uint, TrackInfo>(shared);
+
+        // 优先级 3 的种子先打底
         var map = new Dictionary<uint, TrackInfo>();
         foreach (var (fileId, name, index) in Seed)
             map[fileId] = new TrackInfo { FileId = fileId, Name = name, Index = index };
+
+        // 优先级 2：本地研究目录文件覆盖
         try
         {
             mapFile ??= MapFile;
             if (!File.Exists(mapFile)) return map;
-            using var doc = JsonDocument.Parse(File.ReadAllText(mapFile));
-            var root = doc.RootElement;
-            var tracks = root.ValueKind == JsonValueKind.Array ? root
-                : root.ValueKind == JsonValueKind.Object && root.TryGetProperty("tracks", out var t) ? t
-                : default;
-            if (tracks.ValueKind != JsonValueKind.Array) return map;
-            foreach (var el in tracks.EnumerateArray())
-            {
-                if (el.ValueKind != JsonValueKind.Object) continue;
-                if (!el.TryGetProperty("fileID", out var fidEl) || fidEl.ValueKind != JsonValueKind.Number) continue;
-                // 逐条容错：单条损坏（如 score:null 对非可空字段）不影响其他条目
-                TrackInfo? info = null;
-                try { info = JsonSerializer.Deserialize<TrackInfo>(el.GetRawText(), JsonOpts); }
-                catch { continue; }
-                if (info == null || info.FileId == 0) continue;
-                // 种子以外按文件数据覆盖
-                map[info.FileId] = info;
-            }
+            foreach (var (fileId, info) in ParseTracksJson(File.ReadAllText(mapFile)))
+                map[fileId] = info;
         }
         catch { /* 映射文件损坏时仅使用种子 */ }
         return map;
+    }
+
+    /// <summary>解析 tracks JSON（顶层数组或 {"tracks":[]} 包装）为 fileID → TrackInfo，不含种子。</summary>
+    public static Dictionary<uint, TrackInfo> ParseTracksJson(string json)
+    {
+        var result = new Dictionary<uint, TrackInfo>();
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var tracks = root.ValueKind == JsonValueKind.Array ? root
+            : root.ValueKind == JsonValueKind.Object && root.TryGetProperty("tracks", out var t) ? t
+            : default;
+        if (tracks.ValueKind != JsonValueKind.Array) return result;
+        foreach (var el in tracks.EnumerateArray())
+        {
+            if (el.ValueKind != JsonValueKind.Object) continue;
+            if (!el.TryGetProperty("fileID", out var fidEl) || fidEl.ValueKind != JsonValueKind.Number) continue;
+            var info = JsonSerializer.Deserialize<TrackInfo>(el.GetRawText(), JsonOpts);
+            if (info == null || info.FileId == 0) continue;
+            result[info.FileId] = info;
+        }
+        return result;
     }
 
     public static TrackInfo? InfoOf(IReadOnlyDictionary<uint, TrackInfo> map, uint fileId)

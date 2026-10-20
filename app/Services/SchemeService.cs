@@ -265,7 +265,7 @@ public static class SchemeService
         {
             wemPath = RawWemPath(manifest.Id, track);
             var preset = track.Encode?.Preset ?? "normal";
-            int rc = await encoder.EncodeAsync(audioPath, wemPath, preset == "chiptune-6k",
+            int rc = await encoder.EncodeAsync(audioPath, wemPath, PresetService.HzForPreset(preset),
                 log, ct, loop: track.Encode?.Loop ?? false);
             if (rc != 0 || !File.Exists(wemPath))
                 throw new SchemeException("编码失败（退出码 " + rc + "）");

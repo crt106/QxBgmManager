@@ -96,10 +96,8 @@
                                             </DataTemplate>
                                         </ComboBox.ItemTemplate>
                                     </ComboBox>
-                                    <ComboBox Width="90" Margin="8,0,0,0" SelectedIndex="{Binding PresetIndex}">
-                                        <ComboBoxItem Content="普通" />
-                                        <ComboBoxItem Content="8bit" />
-                                    </ComboBox>
+                                    <ComboBox Width="110" Margin="8,0,0,0" SelectedIndex="{Binding PresetIndex}"
+                                              ItemsSource="{Binding DataContext.PresetNames, RelativeSource={RelativeSource AncestorType=Page}}" />
                                     <TextBlock Text="{Binding Status}" Width="70" Margin="10,0,0,0"
                                                VerticalAlignment="Center" />
                                     <TextBlock Text="{Binding Detail}" Margin="8,0,0,0" VerticalAlignment="Center"

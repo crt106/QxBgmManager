@@ -58,6 +58,13 @@ public partial class MarketViewModel : ObservableObject
             var source = SettingsService.Current.RegistrySource;
             var (dir, message) = await RegistryService.SyncAsync(source, CancellationToken.None);
             _repoDir = dir;
+
+            // 共享配置：config/track-map.json + config/app-config.json → AppState 缓存
+            var sharedMap = RegistryService.LoadSharedTrackMap(dir);
+            var sharedConfig = RegistryService.LoadAppConfig(dir);
+            AppState.SetSharedConfigs(sharedMap, sharedConfig);
+            AppState.InvalidateLibrary();
+
             var (entries, warnings) = await Task.Run(() => RegistryService.LoadEntries(dir));
             WarningsText = warnings.Count > 0 ? string.Join(Environment.NewLine, warnings) : "";
 
@@ -70,6 +77,8 @@ public partial class MarketViewModel : ObservableObject
             RebuildCategories();
             ApplyFilters();
             StatusText = $"{message}；共 {entries.Count} 个条目" +
+                         (sharedMap != null ? $"；共享曲名映射 {sharedMap.Count} 条" : "") +
+                         (sharedConfig != null ? "；共享应用配置已加载" : "") +
                          (warnings.Count > 0 ? $"（{warnings.Count} 条损坏已跳过）" : "");
         }
         catch (Exception ex)

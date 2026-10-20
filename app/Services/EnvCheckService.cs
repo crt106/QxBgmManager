@@ -176,13 +176,17 @@ public static class EnvCheckService
             : (EnvCheckStatus.Fail, "ffmpeg 无法执行：" + output, EnvCheckFix.OpenSettings);
     }
 
-    /// <summary>● 曲名映射文件：缺失给警告级（仅显示 fileID，不影响功能）。</summary>
+    /// <summary>● 曲名映射：registry 共享缓存或本地研究目录文件任一存在即可；缺失给警告级。</summary>
     public static async Task<(EnvCheckStatus, string, EnvCheckFix?)> CheckTrackMapAsync(CancellationToken ct)
     {
         await Task.CompletedTask;
+        // 来源 1：索引仓库 config/track-map.json 的缓存副本
+        if (AppState.SharedTrackMap is { Count: > 0 } shared)
+            return (EnvCheckStatus.Pass, $"{shared.Count} 条映射（来源：索引仓库 config/track-map.json）", null);
+        // 来源 2：本地研究目录 track-map.json
         var file = TrackMapService.MapFile;
         if (!File.Exists(file))
-            return (EnvCheckStatus.Warn, "不存在：全部条目按未识别（fileID）显示，不影响核心功能", null);
+            return (EnvCheckStatus.Warn, "两处均无：索引仓库共享副本与本地 track-map.json 都缺失，全部条目按未识别显示，不影响核心功能", null);
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllText(file));
@@ -192,12 +196,12 @@ public static class EnvCheckService
                 : default;
             int count = tracks.ValueKind == JsonValueKind.Array ? tracks.GetArrayLength() : 0;
             return count > 0
-                ? (EnvCheckStatus.Pass, $"{count} 条映射（{file}）", null)
-                : (EnvCheckStatus.Warn, "文件存在但没有条目", null);
+                ? (EnvCheckStatus.Pass, $"{count} 条映射（来源：本地 track-map.json）", null)
+                : (EnvCheckStatus.Warn, "本地文件存在但没有条目", null);
         }
         catch (Exception ex)
         {
-            return (EnvCheckStatus.Warn, "文件损坏：" + ex.Message + "（按未识别降级）", null);
+            return (EnvCheckStatus.Warn, "本地文件损坏：" + ex.Message + "（按未识别降级）", null);
         }
     }
 
