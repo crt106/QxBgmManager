@@ -41,6 +41,7 @@ public partial class ReplaceCenterViewModel : ObservableObject
     }
 
     private CancellationTokenSource? _cts;
+    private CancellationTokenSource _metadataCts = new();
     private readonly EncodeService _encoder = new();
     private readonly DispatcherTimer _gameWatch;
 
@@ -55,26 +56,26 @@ public partial class ReplaceCenterViewModel : ObservableObject
 
     private async Task InitializeAsync()
     {
-        await LoadTargetsAsync();
         await RefreshPatchesAsync();
     }
 
     // ---- 目标条目 ----
 
-    private async Task LoadTargetsAsync()
+    private void UpdateTargets(IReadOnlyList<PatchInfo> patches)
     {
-        var (ok, message) = await AppState.EnsureLibraryAsync(SettingsService.Current.GameRoot);
-        if (!ok)
-        {
-            ExecuteStatus = message;
-            return;
-        }
+        var backups = patches.ToDictionary(p => (p.PckPath, p.FileId));
         var rows = AppState.Library
             .Select(e => new TrackRow(e, AppState.InfoOf(e.FileId),
-                                      AppState.PatchedIds(e.PckPath).Contains(e.FileId)))
-            .OrderByDescending(r => r.Entry.Size)
+                backups.ContainsKey((e.PckPath, e.FileId)), backups.GetValueOrDefault((e.PckPath, e.FileId))?.OriginalSize))
+            .OrderByDescending(r => r.CapacityBytes)
             .ToList();
         Targets = new ObservableCollection<TrackRow>(rows);
+        foreach (var job in Jobs.Where(j => j.Target != null))
+        {
+            var previous = job.Target!;
+            job.Target = rows.FirstOrDefault(r => r.FileId == previous.FileId &&
+                string.Equals(r.Entry.PckPath, previous.Entry.PckPath, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     // ---- 任务列表 ----
@@ -96,12 +97,34 @@ public partial class ReplaceCenterViewModel : ObservableObject
         foreach (var p in paths)
         {
             if (!File.Exists(p) || Jobs.Any(j => j.SourcePath == p)) continue;
-            Jobs.Add(new ReplaceJob { SourcePath = p });
+            var job = new ReplaceJob { SourcePath = p };
+            Jobs.Add(job);
+            _ = ReadSourceInfoAsync(job, _metadataCts.Token);
         }
     }
 
+    private async Task ReadSourceInfoAsync(ReplaceJob job, CancellationToken ct)
+    {
+        try
+        {
+            var metadata = await Task.Run(() => AudioMetadataService.ReadAsync(job.SourcePath, ct), ct);
+            if (ct.IsCancellationRequested || !Jobs.Contains(job)) return;
+            job.SourceSizeBytes = metadata.SizeBytes;
+            job.SourceDurationSeconds = metadata.DurationSeconds;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Log($"读取音频信息失败：{job.FileName}：{ex.Message}"); }
+        finally { job.IsReadingMetadata = false; }
+    }
+
     [RelayCommand]
-    private void ClearJobs() => Jobs.Clear();
+    private void ClearJobs()
+    {
+        _metadataCts.Cancel();
+        _metadataCts.Dispose();
+        _metadataCts = new();
+        Jobs.Clear();
+    }
 
     // ---- 批量执行 ----
 
@@ -160,7 +183,6 @@ public partial class ReplaceCenterViewModel : ObservableObject
             }
             ExecuteStatus = $"执行完成：成功 {done}，跳过 {skipped}，失败 {failed}。";
             AppState.InvalidateLibrary();
-            await LoadTargetsAsync();
             await RefreshPatchesAsync();
         }
         catch (OperationCanceledException)
@@ -218,6 +240,8 @@ public partial class ReplaceCenterViewModel : ObservableObject
         if (!SettingsService.IsValidGameRoot(root))
         {
             Patches = new ObservableCollection<PatchRow>();
+            Targets = new ObservableCollection<TrackRow>();
+            foreach (var job in Jobs) job.Target = null;
             HasPatches = false;
             PatchesStatus = "游戏根路径无效，请先在设置页配置。";
             return;
@@ -229,6 +253,7 @@ public partial class ReplaceCenterViewModel : ObservableObject
             return;
         }
         var infos = await Task.Run(() => AppState.ScanPatches(root));
+        UpdateTargets(infos);
         var rows = infos
             .Select(i => new PatchRow(i, TrackMapService.NameOf(AppState.TrackMap, i.FileId)))
             .OrderBy(r => r.Info.PckName).ThenBy(r => r.Info.FileId)
@@ -304,20 +329,53 @@ public partial class ReplaceJob : ObservableObject
 {
     public string SourcePath { get; set; } = "";
 
-    [ObservableProperty] private TrackRow? _target;
-    [ObservableProperty] private bool _targetConflict;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TargetSummary))]
+    [NotifyPropertyChangedFor(nameof(CapacityAssessment))]
+    [NotifyPropertyChangedFor(nameof(CapacityWarning))]
+    private TrackRow? _target;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CapacityWarning))]
+    private bool _targetConflict;
     [ObservableProperty] private int _presetIndex;   // 0 普通 / 1 8bit(6kHz 低通)
     [ObservableProperty] private string _status = "待执行";
     [ObservableProperty] private string _detail = "";
     [ObservableProperty] private double _progress;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SourceSummary))]
+    private bool _isReadingMetadata = true;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SourceSummary))]
+    private long _sourceSizeBytes;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SourceSummary))]
+    [NotifyPropertyChangedFor(nameof(EstimatedWemBytes))]
+    [NotifyPropertyChangedFor(nameof(CapacityAssessment))]
+    [NotifyPropertyChangedFor(nameof(CapacityWarning))]
+    private double? _sourceDurationSeconds;
+
+    public long? EstimatedWemBytes => AudioMetadata.EstimateWemBytes(SourceDurationSeconds);
+    public string SourceSummary => IsReadingMetadata ? "正在读取音频时长…"
+        : (SourceDurationSeconds is { } seconds ? $"时长 {TrackRow.FormatSeconds(seconds)}" : "时长暂不可用")
+          + $" · 源文件 {AudioMetadata.FormatBytes(SourceSizeBytes)}"
+          + (EstimatedWemBytes is { } size ? $" · 预计转码 {AudioMetadata.FormatBytes(size)}" : "");
+    public string TargetSummary => Target is { } row ? row.ReplacementInfoText + $" · 文件编号 {row.FileId}" : "";
+    public bool CapacityWarning => TargetConflict || (Target is { } row && EstimatedWemBytes is { } size && size > row.CapacityBytes);
+    public string CapacityAssessment => TargetConflict ? "这首原曲已替换，请先在下方恢复"
+        : Target is not { } row || EstimatedWemBytes is not { } size ? ""
+        : size <= row.CapacityBytes ? "预计容量充足"
+        : $"预计超出容量 {AudioMetadata.FormatBytes(size - row.CapacityBytes)}，请选择更长的原曲或缩短音频";
 
     public string FileName => Path.GetFileName(SourcePath);
     public string WemPath => Path.Combine(SettingsService.ImportDir,
         Path.GetFileNameWithoutExtension(SourcePath) + ".wem");
 
-    partial void OnTargetChanged(TrackRow? value)
+    partial void OnTargetChanged(TrackRow? oldValue, TrackRow? newValue)
     {
-        TargetConflict = value is { IsPatched: true };
+        bool sameTrack = oldValue?.FileId == newValue?.FileId &&
+            string.Equals(oldValue?.Entry.PckPath, newValue?.Entry.PckPath, StringComparison.OrdinalIgnoreCase);
+        if (!sameTrack && Status is "完成" or "跳过" or "失败") { Status = "待执行"; Detail = ""; }
+        TargetConflict = newValue is { IsPatched: true };
         if (TargetConflict) Detail = "请先在下方恢复这首原曲";
         else if (Detail == "请先在下方恢复这首原曲") Detail = "";
     }

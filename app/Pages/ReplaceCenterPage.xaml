@@ -3,6 +3,7 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:vm="clr-namespace:QxBgmManager.ViewModels"
+      xmlns:controls="clr-namespace:QxBgmManager.Controls"
       Title="替换中心"
       d:DataContext="{d:DesignInstance Type=vm:ReplaceCenterViewModel}"
       xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -65,15 +66,18 @@
                 <StackPanel>
                     <Grid Margin="16,8,16,0">
                         <StackPanel Orientation="Horizontal">
-                            <ui:Button Content="添加文件" Command="{Binding AddFilesCommand}" />
+                            <ui:Button Content="添加文件" Command="{Binding AddFilesCommand}"
+                                       IsEnabled="{Binding IsExecuting, Converter={StaticResource InverseBool}}" />
                             <ui:Button Content="清空列表" Margin="8,0,0,0" Appearance="Secondary"
-                                       Command="{Binding ClearJobsCommand}" />
+                                       Command="{Binding ClearJobsCommand}"
+                                       IsEnabled="{Binding IsExecuting, Converter={StaticResource InverseBool}}" />
                             <ui:TextBlock VerticalAlignment="Center" Margin="12,0,0,0"
                                           Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
                                           Text="可直接拖放音频文件到列表" />
                         </StackPanel>
                     </Grid>
-                    <ListBox Margin="16" MinHeight="120" MaxHeight="260" AllowDrop="True"
+                    <ListBox Margin="16" MinHeight="140" MaxHeight="420" AllowDrop="True"
+                             HorizontalContentAlignment="Stretch"
                              ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ItemsSource="{Binding Jobs}"
                              Drop="JobsList_Drop"
@@ -81,26 +85,30 @@
                              BorderThickness="1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid Margin="2">
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                <Grid Margin="4,7">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="3*" /><ColumnDefinition Width="110" /><ColumnDefinition Width="80" /></Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding FileName}" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <ComboBox Grid.Column="1" Margin="8,0,0,0"
-                                              ItemsSource="{Binding DataContext.Targets, RelativeSource={RelativeSource AncestorType=Page}}"
-                                              SelectedItem="{Binding Target}"
-                                              ToolTip="选择原曲">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding CapacityText}" />
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                    <ComboBox Grid.Column="2" Margin="8,0,0,0" SelectedIndex="{Binding PresetIndex}"
+                                    <TextBlock Grid.ColumnSpan="4" Text="{Binding FileName}" VerticalAlignment="Center"
+                                               FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding SourcePath}" />
+                                    <TextBlock Grid.Row="1" Grid.ColumnSpan="4" Text="{Binding SourceSummary}" Margin="0,4,0,8" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <controls:TrackPicker Grid.Row="2" Grid.ColumnSpan="2"
+                                                          ItemsSource="{Binding DataContext.Targets, RelativeSource={RelativeSource AncestorType=Page}}"
+                                                          SelectedTrack="{Binding Target, Mode=TwoWay}" RequiredBytes="{Binding EstimatedWemBytes}"
+                                                          IsEnabled="{Binding DataContext.IsExecuting, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource InverseBool}}" />
+                                    <ComboBox Grid.Row="2" Grid.Column="2" Margin="8,0,0,0" SelectedIndex="{Binding PresetIndex}"
+                                              IsEnabled="{Binding DataContext.IsExecuting, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource InverseBool}}"
                                               ItemsSource="{Binding DataContext.PresetNames, RelativeSource={RelativeSource AncestorType=Page}}" />
-                                    <TextBlock Grid.Column="3" Text="{Binding Status}" Margin="10,0,0,0"
+                                    <TextBlock Grid.Row="2" Grid.Column="3" Text="{Binding Status}" Margin="10,0,0,0"
                                                VerticalAlignment="Center" />
-                                    <TextBlock Grid.Row="1" Grid.ColumnSpan="4" Text="{Binding Detail}" Margin="0,4,0,0" TextWrapping="Wrap" VerticalAlignment="Center"
+                                    <TextBlock Grid.Row="3" Grid.ColumnSpan="4" Text="{Binding TargetSummary}" Margin="0,6,0,0" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Grid.Row="4" Grid.ColumnSpan="4" Text="{Binding CapacityAssessment}" TextWrapping="Wrap"
+                                               Foreground="{Binding CapacityWarning, Converter={StaticResource BoolToWarnBrush}}" />
+                                    <TextBlock Grid.Row="5" Grid.ColumnSpan="4" Text="{Binding Detail}" Margin="0,4,0,0" TextWrapping="Wrap" VerticalAlignment="Center"
                                                Foreground="{Binding TargetConflict, Converter={StaticResource BoolToWarnBrush}}" />
                                 </Grid>
                             </DataTemplate>

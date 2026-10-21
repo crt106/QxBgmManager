@@ -7,12 +7,15 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using System.Windows.Controls.Primitives;
+using QxBgmManager.Controls;
 using QxBgmManager;
 using QxBgmManager.Pages;
 using QxBgmManager.Services;
 using QxBgmManager.ViewModels;
 using Wpf.Ui.Controls;
 using DataGrid = System.Windows.Controls.DataGrid;
+using TextBlock = System.Windows.Controls.TextBlock;
 
 internal static class Program
 {
@@ -148,7 +151,9 @@ internal static class Program
                 $"{type.Name} 在矮窗口中获得有限滚动视口 {outer.ViewportHeight:F0}");
             if (current.DataContext is ReplaceCenterViewModel replace)
             {
-                for (int i = 0; i < 30; i++) replace.Jobs.Add(new ReplaceJob { SourcePath = $"测试音频{i}.wav" });
+                await CheckTrackPicker(window, current, replace, outer);
+                for (int i = 0; i < 30; i++) replace.Jobs.Add(new ReplaceJob
+                    { SourcePath = $"测试音频{i}.wav", SourceDurationSeconds = 2, SourceSizeBytes = 192044, IsReadingMetadata = false });
                 await Settle();
                 var list = Children<ListBox>(current).First(l => ReferenceEquals(l.ItemsSource, replace.Jobs));
                 var inner = Children<ScrollViewer>(list).First();
@@ -194,6 +199,118 @@ internal static class Program
         browse.UpdateLayout();
         var bottom = archive.TranslatePoint(new Point(0, archive.ActualHeight), browse).Y;
         Check(bottom <= 471, $"奇域档案展开后底部仍在矮窗口内（{bottom:F0}）");
+    }
+
+    private static async Task CheckTrackPicker(Window window, Page page, ReplaceCenterViewModel vm, ScrollViewer outer)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "qxbgm-picker-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        double previousHeight = window.Height;
+        try
+        {
+            string path = Path.Combine(dir, "自定义音乐.wav");
+            const int samples = 48000 * 3;
+            using (var writer = new BinaryWriter(File.Create(path)))
+            {
+                writer.Write("RIFF"u8); writer.Write(36 + samples * 4); writer.Write("WAVEfmt "u8);
+                writer.Write(16); writer.Write((short)1); writer.Write((short)2); writer.Write(48000);
+                writer.Write(192000); writer.Write((short)4); writer.Write((short)16);
+                writer.Write("data"u8); writer.Write(samples * 4); writer.Write(new byte[samples * 4]);
+            }
+            window.Height = 800;
+            vm.AddFiles([path]);
+            var job = vm.Jobs.Single();
+            for (int i = 0; i < 200 && job.IsReadingMetadata; i++) await Task.Delay(50);
+            outer.ScrollToTop();
+            await Settle();
+            Check(job.SourceDurationSeconds is { } duration && Math.Abs(duration - 3) < 0.001,
+                "添加源音频后自动读取真实时长");
+            Check(Children<TextBlock>(page).Any(t => t.Text == job.SourceSummary && t.IsVisible)
+                  && job.SourceSummary.Contains("0:03") && job.SourceSummary.Contains("源文件"), "任务界面显示源时长、大小和预计转码大小");
+            var picker = Children<TrackPicker>(page).Single();
+            var toggle = (ToggleButton)picker.FindName("PickerButton");
+            Check(toggle.ActualWidth >= picker.ActualWidth - 2, "原曲选择按钮占满可用宽度，长曲名可正常省略显示");
+            var popup = (Popup)picker.FindName("PickerPopup");
+            var search = (System.Windows.Controls.TextBox)picker.FindName("SearchBox");
+            var results = (ListBox)picker.FindName("ResultsList");
+            var target = vm.Targets.First(t => !t.IsPatched && t.CapacityBytes >= job.EstimatedWemBytes);
+            toggle.IsChecked = true;
+            await Settle();
+            Check(popup.IsOpen && ReferenceEquals(search.DataContext, picker.Model) && results.Items.Count > 0,
+                "打开真实原曲下拉后显示搜索、筛选和候选列表");
+            var categoryBox = (ListBox)picker.FindName("CategoryFilter");
+            var category = picker.Model.Categories.Single(c => c.Key == target.CategoryKey);
+            categoryBox.SetCurrentValue(Selector.SelectedItemProperty, category);
+            categoryBox.GetBindingExpression(Selector.SelectedItemProperty)!.UpdateSource();
+            await Settle();
+            Check(popup.IsOpen && picker.Model.Category == category && results.Items.Cast<TrackRow>().All(r => r.CategoryKey == category.Key),
+                "真实分类选项可操作，筛选时原曲面板保持打开");
+            picker.Model.ResetCommand.Execute(null);
+            search.SetCurrentValue(System.Windows.Controls.TextBox.TextProperty, target.FileId.ToString());
+            search.GetBindingExpression(System.Windows.Controls.TextBox.TextProperty)!.UpdateSource();
+            await Settle();
+            Check(results.Items.Count == 1 && ReferenceEquals(results.Items[0], target), "输入原曲编号实时过滤下拉结果");
+            SnapshotElement((FrameworkElement)popup.Child, "track-picker-open");
+            search.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(search)!, 0, Key.Enter)
+                { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+            await Settle();
+            Check(!popup.IsOpen && ReferenceEquals(job.Target, target), "在唯一搜索结果上按回车可选中原曲并关闭下拉");
+            Check(Children<TextBlock>(page).Any(t => t.Text == job.TargetSummary && t.IsVisible)
+                  && job.TargetSummary.Contains("原曲") && job.TargetSummary.Contains("可用"), "下拉关闭后仍显示所选原曲时长和容量");
+            Snapshot(window, "replace-source-and-target-info");
+            var alternate = vm.Targets.First(t => !t.IsPatched && t.FileId != target.FileId);
+            toggle.IsChecked = true;
+            await Settle();
+            Check(popup.IsOpen, "选中原曲后可以再次打开下拉改选");
+            search.SetCurrentValue(System.Windows.Controls.TextBox.TextProperty, alternate.FileId.ToString());
+            search.GetBindingExpression(System.Windows.Controls.TextBox.TextProperty)!.UpdateSource();
+            await Settle();
+            var candidate = (ListBoxItem)results.ItemContainerGenerator.ContainerFromIndex(0);
+            candidate.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+                { RoutedEvent = Mouse.PreviewMouseUpEvent });
+            await Settle();
+            Check(!popup.IsOpen && ReferenceEquals(job.Target, alternate), "鼠标点击候选曲目可完成选择");
+            target = alternate;
+            window.Height = 520;
+            await Settle();
+            outer.ScrollToVerticalOffset(200);
+            await Settle();
+            toggle.IsChecked = true;
+            await Settle();
+            picker.Model.SearchText = "没有匹配的原曲";
+            await Settle();
+            Check(results.Items.Count == 0 && ReferenceEquals(job.Target, target), "矮窗口调整搜索结果不会清空已经选好的原曲");
+            picker.Model.ResetCommand.Execute(null);
+            picker.Model.AvailabilityIndex = 1;
+            await Settle();
+            Check(results.Items.Count == vm.Targets.Count, "真实下拉可切换全部状态");
+            picker.Model.RequiredBytes = long.MaxValue;
+            picker.Model.FitsOnly = true;
+            await Settle();
+            Check(results.Items.Count == 0 && ReferenceEquals(job.Target, target), "真实下拉容量筛选即时生效并保留已选项");
+            toggle.IsChecked = false;
+            job.Status = "完成";
+            await vm.RefreshPatchesCommand.ExecuteAsync(null);
+            await Settle();
+            Check(job.Target?.FileId == target.FileId && job.Status == "完成", "刷新替换记录后仍保留原曲选择和已完成状态");
+        }
+        finally
+        {
+            vm.ClearJobsCommand.Execute(null);
+            window.Height = previousHeight;
+            Directory.Delete(dir, true);
+            await Settle();
+        }
+    }
+
+    private static void SnapshotElement(FrameworkElement element, string name)
+    {
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(element.ActualWidth), (int)Math.Ceiling(element.ActualHeight), 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(element);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var output = File.Create(Path.Combine(OutputDirectory, name + ".png"));
+        encoder.Save(output);
     }
 
     private static async Task CheckProgress(Window window, ConvertViewModel convert, ScrollViewer outer)

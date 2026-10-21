@@ -502,6 +502,8 @@ Check(script.Contains(testPid.ToString()) && script.Contains(testNew),
 
 PckSafetyTests.Run(Check);
 await EncodeServiceTests.Run(Check);
+TrackPickerTests.Run(Check);
+await TrackPickerTests.CheckMetadataAsync(Check);
 Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILURES");
 return failures;
 

@@ -1,0 +1,93 @@
+<UserControl x:Class="QxBgmManager.Controls.TrackPicker"
+             x:Name="Root"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+    <UserControl.Resources>
+        <Style x:Key="FilterOption" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Margin" Value="0,0,5,3" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+    </UserControl.Resources>
+    <Grid DataContext="{Binding Model, ElementName=Root}">
+        <ToggleButton x:Name="PickerButton" Padding="12,7" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" ToolTip="{Binding SelectionText}"
+                      AutomationProperties.Name="选择要替换的原曲">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding SelectionText}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="⌄" Margin="12,0,0,0" VerticalAlignment="Center" />
+            </Grid>
+        </ToggleButton>
+        <Popup x:Name="PickerPopup" PlacementTarget="{Binding ElementName=PickerButton}" Placement="Bottom"
+               IsOpen="{Binding IsChecked, ElementName=PickerButton, Mode=TwoWay}"
+               StaysOpen="False" AllowsTransparency="True" Opened="Popup_Opened">
+            <Border Width="580" MaxHeight="460" Padding="12" Margin="0,4,0,4" CornerRadius="8"
+                    Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                    PreviewKeyDown="Popup_KeyDown">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <ui:TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="搜索曲名、索引、文件编号或专辑" Icon="{ui:SymbolIcon Search24}"
+                                AutomationProperties.Name="搜索原曲" PreviewKeyDown="Search_KeyDown" />
+                    <Grid Grid.Row="1" Margin="0,8,0,8">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <ListBox x:Name="CategoryFilter" Grid.ColumnSpan="2" ItemsSource="{Binding Categories}" DisplayMemberPath="Name"
+                                 SelectedItem="{Binding Category}" BorderThickness="0" Background="Transparent"
+                                 ItemContainerStyle="{StaticResource FilterOption}" AutomationProperties.Name="原曲分类"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                            <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ListBox.ItemsPanel>
+                        </ListBox>
+                        <ListBox Grid.Row="1" ItemsSource="{Binding AvailabilityOptions}" SelectedIndex="{Binding AvailabilityIndex}"
+                                 BorderThickness="0" Background="Transparent" ItemContainerStyle="{StaticResource FilterOption}"
+                                 AutomationProperties.Name="替换状态" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                            <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+                        </ListBox>
+                        <CheckBox Grid.Row="1" Grid.Column="1" Content="容量足够" Margin="12,0,0,0" VerticalAlignment="Center"
+                                  IsChecked="{Binding FitsOnly}" IsEnabled="{Binding CanFilterByCapacity}"
+                                  ToolTip="按源音频时长估算，最终以转码结果为准" />
+                    </Grid>
+                    <Grid Grid.Row="2" MinHeight="60">
+                        <ListBox x:Name="ResultsList" ItemsSource="{Binding Results}" BorderThickness="0" Background="Transparent"
+                                 HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True"
+                                 MinHeight="60" MaxHeight="220"
+                                 PreviewMouseUp="Result_Click" PreviewKeyDown="Results_KeyDown"
+                                 AutomationProperties.Name="可选原曲">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="3,5">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding PickerTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding ReplacementInfoText}" FontSize="12" Margin="0,3,0,0"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{Binding ReplacementStateText}" FontSize="12" Margin="12,0,0,0"
+                                                   VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock Text="没有匹配曲目，请调整搜索或筛选" TextWrapping="Wrap" HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Visibility="{Binding HasResults, Converter={StaticResource BoolToVis}, ConverterParameter=invert}" />
+                    </Grid>
+                    <Grid Grid.Row="3" Margin="0,8,0,0">
+                        <TextBlock Text="{Binding CountText}" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <Button Content="重置筛选" Command="{Binding ResetCommand}" HorizontalAlignment="Right" Padding="10,4" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>

@@ -15,6 +15,10 @@ public partial class TrackRow : ObservableObject
     public uint FileId => Entry.FileId;
     public string PckName => Entry.PckName;
     public string SizeText => $"{Entry.Size / 1048576.0:F2} MB";
+    public uint CapacityBytes { get; }
+    public string PickerTitle => $"{IndexText}  {TrackName}";
+    public string ReplacementInfoText => $"{CategoryText} · 原曲 {FormatSeconds(Info is { DurationSec: > 0 } ? Info.DurationSec : CapacityBytes / PckService.BytesPerSecond)} · 可用 {AudioMetadata.FormatBytes(CapacityBytes)}";
+    public string ReplacementStateText => IsPatched ? "已替换" : "可替换";
 
     /// <summary>映射时长优先，否则按字节数估算（54 KB/s）。</summary>
     public double DurationSeconds => Info is { DurationSec: > 0 } ? Info.DurationSec : Entry.DurationSeconds;
@@ -61,11 +65,12 @@ public partial class TrackRow : ObservableObject
     /// <summary>试听解码进行中。</summary>
     [ObservableProperty] private bool _busy;
 
-    public TrackRow(PckEntry entry, TrackInfo? info, bool isPatched)
+    public TrackRow(PckEntry entry, TrackInfo? info, bool isPatched, uint? originalSize = null)
     {
         Entry = entry;
         Info = info;
         IsPatched = isPatched;
+        CapacityBytes = originalSize ?? entry.Size;
     }
 
     public static string FormatSeconds(double seconds)
