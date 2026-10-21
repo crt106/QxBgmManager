@@ -39,13 +39,15 @@ public static class UpdateService
                 ?.InformationalVersion;
             return ParseVersion(info)
                    ?? Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3)
-                   ?? "1.1.0";
+                   ?? "0.1.1";
         }
     }
 
     /// <summary>框架依赖/调试运行（非单文件发布）时不能自替换 exe。</summary>
     public static bool IsFrameworkDependentRun
+#pragma warning disable IL3000 // 刻意利用单文件发布下 Location 为空来判定发布形态
         => !string.IsNullOrEmpty(Assembly.GetExecutingAssembly().Location);
+#pragma warning restore IL3000
 
     /// <summary>
     /// 查询 GitHub latest release。网络失败/解析失败/速率限制一律按"无更新"静默返回（Error 记原因）。
