@@ -29,13 +29,16 @@ public record EncodeProgress(string Stage, double Percent, double Elapsed, doubl
         {
             using var doc = JsonDocument.Parse(line[prefix.Length..]);
             var root = doc.RootElement;
+            var pct = root.GetProperty("percent").GetDouble();
+            if (!double.IsFinite(pct)) pct = 0;
             progress = new EncodeProgress(root.GetProperty("stage").GetString() ?? "encode",
-                Math.Clamp(root.GetProperty("percent").GetDouble(), 0, 100),
+                Math.Clamp(pct, 0, 100),
                 root.GetProperty("elapsed").GetDouble(), root.GetProperty("remaining").GetDouble());
             return true;
         }
         catch (JsonException) { return false; }
         catch (InvalidOperationException) { return false; }
         catch (KeyNotFoundException) { return false; }
+        catch (FormatException) { return false; }
     }
 }

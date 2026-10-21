@@ -99,23 +99,33 @@ def cmd_patch(args):
         orig_wem = f.read(e["size"])
         f.seek(e["lut_pos"])
         orig_lut = f.read(LUT_ENTRY_SIZE)
+
+        # 先持久化音频备份并原子提交清单，再触碰 pck：任一步中断都可安全重试恢复
+        bin_name = f"{bp}.{args.file_id}.bin"
+        backup["entries"].append({
+            "fileID": e["fileID"], "offset": e["offset"], "size": e["size"],
+            "lut_pos": e["lut_pos"],
+            "orig_wem_b64": None, "orig_wem_file": os.path.basename(bin_name),
+            "orig_lut_hex": orig_lut.hex(),
+        })
+        with open(bin_name, "xb") as bf:
+            bf.write(orig_wem)
+        try:
+            tmp = bp + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as mf:
+                json.dump(backup, mf, indent=1)
+            os.replace(tmp, bp)
+        except BaseException:
+            os.remove(bin_name)
+            raise
+
         f.seek(e["offset"])
         f.write(new)
         f.write(b"\x00" * (e["size"] - len(new)))
         f.seek(e["lut_pos"])
         f.write(struct.pack("<IIIQ", e["fileID"], e["lang"], len(new), e["offset"]))
-    backup["entries"].append({
-        "fileID": e["fileID"], "offset": e["offset"], "size": e["size"],
-        "lut_pos": e["lut_pos"],
-        "orig_wem_b64": None, "orig_wem_file": None, "orig_lut_hex": orig_lut.hex(),
-    })
-    # 原始 wem 字节较大，单独存 bin
-    bin_name = f"{bp}.{args.file_id}.bin"
-    with open(bin_name, "wb") as f:
-        f.write(orig_wem)
-    backup["entries"][-1]["orig_wem_file"] = os.path.basename(bin_name)
-    with open(bp, "w", encoding="utf-8") as f:
-        json.dump(backup, f, indent=1)
+        f.flush()
+        os.fsync(f.fileno())
     print(f"patched fileID {args.file_id}: {e['size']:,} B -> {len(new):,} B "
           f"(backup: {bp})")
 
@@ -126,18 +136,38 @@ def cmd_restore(args):
         sys.exit("no backup; nothing to restore")
     with open(bp, encoding="utf-8") as f:
         backup = json.load(f)
+    total = len(backup["entries"])
     with open(args.pck, "r+b") as f:
-        for b in backup["entries"]:
+        for b in list(backup["entries"]):
             bin_name = os.path.join(os.path.dirname(bp), b["orig_wem_file"])
             with open(bin_name, "rb") as bf:
                 orig = bf.read()
+            lut = bytes.fromhex(b["orig_lut_hex"])
+            if len(orig) != b["size"] or len(lut) != LUT_ENTRY_SIZE:
+                sys.exit("备份不完整，无法恢复")
             f.seek(b["offset"])
             f.write(orig)
             f.seek(b["lut_pos"])
-            f.write(bytes.fromhex(b["orig_lut_hex"]))
+            f.write(lut)
+            f.flush()
+            os.fsync(f.fileno())
+            f.seek(b["offset"])
+            if f.read(len(orig)) != orig:
+                sys.exit("恢复校验失败，请重试")
+            f.seek(b["lut_pos"])
+            if f.read(LUT_ENTRY_SIZE) != lut:
+                sys.exit("恢复校验失败，请重试")
+            # 清单更新成功后才删除数据，恢复中断时不会留下指向缺失数据的清单
+            backup["entries"].remove(b)
+            if backup["entries"]:
+                tmp = bp + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as mf:
+                    json.dump(backup, mf, indent=1)
+                os.replace(tmp, bp)
+            else:
+                os.remove(bp)
             os.remove(bin_name)
-    os.remove(bp)
-    print(f"restored {len(backup['entries'])} entries in {args.pck}")
+    print(f"restored {total} entries in {args.pck}")
 
 
 def cmd_status(args):
