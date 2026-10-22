@@ -8,4 +8,8 @@
     <AssemblyName>QxBgmManager.UiTests</AssemblyName>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="..\..\QxBgmManager.csproj" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\SchemeTests\SyntheticPckFixture.cs" Link="SyntheticPckFixture.cs" />
+    <Compile Include="..\SchemeTests\TestAudioFixture.cs" Link="TestAudioFixture.cs" />
+  </ItemGroup>
 </Project>

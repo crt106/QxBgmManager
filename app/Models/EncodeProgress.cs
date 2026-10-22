@@ -10,6 +10,7 @@ public record EncodeProgress(string Stage, double Percent, double Elapsed, doubl
         "prepare" => "正在读取音频…",
         "write" => "正在保存…",
         "done" => "转码完成",
+        "cached" => "已复用转码结果",
         _ => $"{Percent:F0}% · 已用 {FormatTime(Elapsed)}" +
              (Remaining > 0 ? $" · 预计还需 {FormatTime(Remaining)}" : ""),
     };

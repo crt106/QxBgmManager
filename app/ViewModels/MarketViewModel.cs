@@ -132,72 +132,75 @@ public partial class MarketViewModel : ObservableObject
 
     // ---- 安装 / 升级 / 卸载 ----
 
+    private CancellationTokenSource? _installCts;
+
     [RelayCommand]
-    private async Task InstallAsync(MarketEntryRow? row)
+    private Task InstallAsync(MarketEntryRow? row) => InstallOrUpgradeAsync(row, false);
+
+    private async Task InstallOrUpgradeAsync(MarketEntryRow? row, bool upgrading)
     {
-        if (row == null || row.Busy) return;
+        if (row == null || IsBusy || row.Busy) return;
+        IsBusy = true;
         row.Busy = true;
-        row.StateText = "安装中…";
-        row.Detail = "";
+        _installCts = new CancellationTokenSource();
+        using var activity = TaskActivityService.Begin(upgrading ? "升级方案" : "安装方案", () => _installCts?.Cancel());
+        row.StateText = "准备中…";
         try
         {
-            var (manifest, packageZip, baseUri) = await ObtainManifestAsync(row.Entry);
+            var ct = _installCts.Token;
+            var (manifest, packageZip, baseUri) = await ObtainManifestAsync(row.Entry, ct);
             var (ok, message) = await AppState.EnsureLibraryAsync(SettingsService.Current.GameRoot);
             if (!ok) throw new SchemeException(message);
-
+            var previous = InstallRegistryService.Load().FirstOrDefault(s => s.RegistryId == row.Entry.Id || s.Id == manifest.Id);
+            using var prepared = await SchemeInstallService.PrepareAsync(manifest, manifest.Tracks, AppState.Library,
+                packageZip, baseUri, previous, upgrading, Log, (i, text, p) => App.Dispatch(() =>
+                {
+                    row.Detail = text;
+                    activity.Report(text, 80.0 * (i + (p?.Percent ?? 0) / 100) / manifest.Tracks.Count);
+                }), ct);
+            if (upgrading && previous != null && !await SchemeInstallService.UninstallAsync(previous, ct))
+                throw new SchemeException("部分原曲尚未恢复，请重试恢复后升级");
             var installed = new InstalledScheme
             {
-                Id = manifest.Id,
-                Name = manifest.Name,
-                Author = manifest.Author,
-                Description = manifest.Description,
-                InstalledAt = DateTime.Now,
-                RegistryId = row.Entry.Id,
-                RegistryVersion = row.Entry.Version,
+                Id = manifest.Id, Name = manifest.Name, Author = manifest.Author, Description = manifest.Description,
+                InstalledAt = DateTime.Now, RegistryId = row.Entry.Id, RegistryVersion = row.Entry.Version,
             };
-            int patched = 0, skipped = 0;
-            foreach (var t in manifest.Tracks)
+            await SchemeInstallService.InstallAsync(installed, prepared, (i, text) => App.Dispatch(() =>
             {
-                var entry = SchemeService.FindTarget(t, AppState.Library)
-                            ?? throw new SchemeException($"目标条目不在曲库：fileID {t.Target.FileId}");
-                var r = await SchemeService.InstallTrackAsync(manifest, t, entry, packageZip, baseUri,
-                    _encoder, Log, CancellationToken.None, p => App.Dispatch(() => row.Detail = p.DisplayText));
-                if (r != null) { installed.Tracks.Add(r); patched++; }
-                else skipped++;
-            }
-            InstallRegistryService.Upsert(installed);
-            AppState.InvalidateLibrary();
-            row.Installed = installed;
-            row.StateText = $"已安装 v{row.Entry.Version}";
-            row.Detail = $"打入 {patched} 条" + (skipped > 0 ? $"，跳过已补丁 {skipped} 条" : "");
-            if (manifest.Wonderland != null)
-                WonderPrompt = $"本方案关联奇域「{manifest.Wonderland.Name}」（{manifest.Wonderland.Id}），可一键登记到奇域档案。";
+                row.Detail = text;
+                activity.Report(text, 80 + 20.0 * (i + 1) / manifest.Tracks.Count);
+            }), ct);
+            row.Detail = $"已安装 {installed.Tracks.Count} 首音乐";
+            activity.Report(row.Detail, 100);
             _lastInstalled = manifest;
-            Log($"市场安装完成：{row.Entry.Name} v{row.Entry.Version}（{patched} 条）");
+            if (manifest.Wonderland != null) WonderPrompt = $"可登记奇域「{manifest.Wonderland.Name}」";
         }
         catch (Exception ex)
         {
-            row.StateText = row.Installed != null
-                ? $"已安装 v{row.Installed.RegistryVersion}"
-                : "未安装";
-            row.Detail = "安装失败：" + ex.Message;
-            Log($"{row.Entry.Name} 安装失败：{ex.Message}");
+            row.Detail = ex is OperationCanceledException ? "已取消，已完成的曲目可在方案管理中恢复" : "安装未完成：" + ex.Message;
+            activity.Report(row.Detail, 0);
+            Log(row.Detail);
         }
         finally
         {
+            AppState.InvalidateLibrary();
+            RefreshInstalledRow(row);
             row.Busy = false;
+            IsBusy = false;
+            _installCts.Dispose();
+            _installCts = null;
         }
     }
 
     /// <summary>获取清单：优先整包 package（.qxbgmzip），否则下载 manifest 并按其来源确定基地址。</summary>
-    private async Task<(SchemeManifest Manifest, string? PackageZip, string? BaseUri)> ObtainManifestAsync(RegistryEntry entry)
+    private async Task<(SchemeManifest Manifest, string? PackageZip, string? BaseUri)> ObtainManifestAsync(RegistryEntry entry, CancellationToken ct)
     {
         var marketDir = Path.Combine(SettingsService.ResearchDir, "market");
         if (entry.Package != null && !string.IsNullOrWhiteSpace(entry.Package.Url))
         {
             string dest = Path.Combine(marketDir, $"{entry.Id}@{entry.Version}.qxbgmzip");
             await RegistryService.FetchFileAsync(entry.Package.Url, _repoDir, dest,
-                entry.Package.Sha256, null, CancellationToken.None);
+                entry.Package.Sha256, null, ct);
             return (SchemeService.LoadManifestFile(dest), dest, null);
         }
         if (entry.Manifest == null || string.IsNullOrWhiteSpace(entry.Manifest.Url))
@@ -212,58 +215,47 @@ public partial class MarketViewModel : ObservableObject
         }
         string tmp = Path.Combine(marketDir, $"{entry.Id}@{entry.Version}.qxbgm.json");
         await RegistryService.FetchFileAsync(url, _repoDir, tmp,
-            entry.Manifest.Sha256, null, CancellationToken.None);
+            entry.Manifest.Sha256, null, ct);
         return (SchemeService.LoadManifestFile(tmp), null, url);
     }
 
     [RelayCommand]
-    private async Task UpgradeAsync(MarketEntryRow? row)
-    {
-        if (row == null) return;
-        var ok = await UninstallAsync(row);
-        if (ok) await InstallAsync(row);
-    }
+    private Task UpgradeAsync(MarketEntryRow? row) => InstallOrUpgradeAsync(row, true);
 
     [RelayCommand]
     private async Task<bool> UninstallAsync(MarketEntryRow? row)
     {
-        if (row == null || row.Busy) return false;
+        if (row == null || row.Busy || IsBusy) return false;
+        IsBusy = true;
         row.Busy = true;
+        using var cts = new CancellationTokenSource();
+        using var activity = TaskActivityService.Begin("恢复方案", cts.Cancel);
         try
         {
-            var installed = row.Installed
-                            ?? InstallRegistryService.Load().FirstOrDefault(s => s.RegistryId == row.Entry.Id);
-            if (installed == null)
-            {
-                row.StateText = "未安装";
-                return true;
-            }
-            int restored = 0;
-            var errors = new List<string>();
-            foreach (var t in installed.Tracks)
-            {
-                try
-                {
-                    await Task.Run(() => PckService.RestoreOne(t.PckPath, t.FileId));
-                    restored++;
-                }
-                catch (Exception ex)
-                {
-                    errors.Add($"{t.PckName} #{t.FileId}：{ex.Message}");
-                }
-            }
-            InstallRegistryService.Remove(installed.Id);
-            AppState.InvalidateLibrary();
-            row.Installed = null;
-            row.StateText = "未安装";
-            row.Detail = $"已复原 {restored}/{installed.Tracks.Count} 条" +
-                         (errors.Count > 0 ? "；" + string.Join("；", errors.Take(2)) : "");
-            return errors.Count == 0;
+            var installed = InstallRegistryService.Load().FirstOrDefault(s => s.RegistryId == row.Entry.Id);
+            bool ok = installed == null || await SchemeInstallService.UninstallAsync(installed, cts.Token);
+            row.Detail = ok ? "已恢复全部原曲" : "部分恢复失败，可再次点击恢复";
+            activity.Report(row.Detail, ok ? 100 : 0);
+            return ok;
         }
+        catch (Exception ex) { row.Detail = ex is OperationCanceledException ? "恢复已取消" : ex.Message; activity.Report(row.Detail, 0); return false; }
         finally
         {
+            RefreshInstalledRow(row);
             row.Busy = false;
+            IsBusy = false;
         }
+    }
+
+    private static void RefreshInstalledRow(MarketEntryRow row)
+    {
+        try
+        {
+            row.Installed = InstallRegistryService.Load().FirstOrDefault(s => s.RegistryId == row.Entry.Id);
+            row.StateText = row.Installed == null ? "未安装" : row.Installed.Status == "已安装"
+                ? $"已安装 v{row.Installed.RegistryVersion}" : row.Installed.Status;
+        }
+        catch (Exception ex) { row.StateText = "登记读取失败"; row.Detail = ex.Message; }
     }
 
     [RelayCommand]
@@ -318,8 +310,8 @@ public partial class MarketEntryRow : ObservableObject
 
     [ObservableProperty] private string _detail = "";
 
-    public bool IsInstalled => StateText.StartsWith("已安装", StringComparison.Ordinal);
-    public bool IsNotInstalled => !IsInstalled && !Busy;
+    public bool IsInstalled => Installed != null;
+    public bool IsNotInstalled => (!IsInstalled || Installed?.Status == "安装未完成") && !Busy;
     public bool CanUpgrade => StateText.StartsWith("可升级", StringComparison.Ordinal);
 
     [ObservableProperty]
@@ -334,6 +326,7 @@ public partial class MarketEntryRow : ObservableObject
         Installed = installed;
         _stateText = installed == null
             ? "未安装"
+            : installed.Status != "已安装" ? installed.Status
             : RegistryService.IsUpgradeAvailable(installed.RegistryVersion, entry.Version)
                 ? $"可升级（已装 v{installed.RegistryVersion} → v{entry.Version}）"
                 : $"已安装 v{installed.RegistryVersion}";

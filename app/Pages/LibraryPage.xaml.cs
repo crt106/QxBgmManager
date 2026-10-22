@@ -11,12 +11,15 @@ public partial class LibraryPage : Page
     {
         DataContext = new LibraryViewModel();
         InitializeComponent();
+        Loaded += (_, _) => AppState.LibraryChanged += RefreshChanged;
+        Unloaded += (_, _) => AppState.LibraryChanged -= RefreshChanged;
         // 导航缓存模式下回到本页：只有曲库被补丁/复原失效、游戏根变化或尚未加载时才重刷，
         // 避免每次切回都全量重建 188 行导致卡顿
         Loaded += (_, _) =>
         {
             if (DataContext is not LibraryViewModel { IsLoading: false } vm) return;
             bool stale = !AppState.Loaded
+                         || vm.LoadedRevision != AppState.Revision
                          || AppState.LoadedRoot != SettingsService.Current.GameRoot
                          || vm.AllRowsCount == 0;
             if (stale)
@@ -24,6 +27,12 @@ public partial class LibraryPage : Page
             else
                 vm.SyncPlaybackState();
         };
+    }
+
+    private void RefreshChanged()
+    {
+        if (IsVisible && DataContext is LibraryViewModel { IsLoading: false } vm)
+            vm.RefreshCommand.Execute(null);
     }
 
     private void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)

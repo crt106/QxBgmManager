@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:pages="clr-namespace:QxBgmManager.Pages"
+        xmlns:services="clr-namespace:QxBgmManager.Services"
         Title="千星BGM替换管理器"
         Width="1280" Height="800" MinWidth="1100" MinHeight="520"
         d:DesignHeight="800" d:DesignWidth="1280"
@@ -45,6 +46,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <ui:TitleBar Grid.Row="0">
@@ -153,5 +155,19 @@
                 </Border>
             </ui:NavigationView.ContentOverlay>
         </ui:NavigationView>
+        <Border x:Name="TaskFooter" Grid.Row="2" Padding="18,10" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                DataContext="{x:Static services:TaskActivityService.Current}"
+                Visibility="{Binding HasActivity, Converter={StaticResource BoolToVis}}">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <StackPanel Margin="0,0,16,0">
+                    <TextBlock Text="{Binding Message}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Message}" Margin="0,0,0,6" />
+                    <ProgressBar Value="{Binding Progress}" Minimum="0" Maximum="100" Height="4" />
+                </StackPanel>
+                <ui:Button Grid.Column="1" Content="取消任务" Command="{Binding CancelCommand}" IsEnabled="{Binding IsRunning}" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
     </Grid>
 </ui:FluentWindow>

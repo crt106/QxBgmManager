@@ -91,8 +91,17 @@
                                         <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="3*" /><ColumnDefinition Width="110" /><ColumnDefinition Width="80" /></Grid.ColumnDefinitions>
-                                    <TextBlock Grid.ColumnSpan="4" Text="{Binding FileName}" VerticalAlignment="Center"
+                                    <TextBlock Grid.ColumnSpan="2" Text="{Binding FileName}" VerticalAlignment="Center"
                                                FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding SourcePath}" />
+                                    <StackPanel Grid.Column="2" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                                                IsEnabled="{Binding DataContext.IsExecuting, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource InverseBool}}">
+                                        <Button Content="更换" ToolTip="更换源音频" Padding="8,3" Margin="4,0,0,0"
+                                                Command="{Binding DataContext.ChangeSourceCommand, RelativeSource={RelativeSource AncestorType=Page}}" CommandParameter="{Binding}" />
+                                        <Button Content="{Binding RunLabel}" IsEnabled="{Binding CanRun}" Padding="8,3" Margin="4,0,0,0"
+                                                Command="{Binding DataContext.RetryJobCommand, RelativeSource={RelativeSource AncestorType=Page}}" CommandParameter="{Binding}" />
+                                        <Button Content="删除" Padding="8,3" Margin="4,0,0,0"
+                                                Command="{Binding DataContext.RemoveJobCommand, RelativeSource={RelativeSource AncestorType=Page}}" CommandParameter="{Binding}" />
+                                    </StackPanel>
                                     <TextBlock Grid.Row="1" Grid.ColumnSpan="4" Text="{Binding SourceSummary}" Margin="0,4,0,8" TextWrapping="Wrap"
                                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                     <controls:TrackPicker Grid.Row="2" Grid.ColumnSpan="2"

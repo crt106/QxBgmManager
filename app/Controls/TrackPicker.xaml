@@ -13,6 +13,7 @@
         </Style>
     </UserControl.Resources>
     <Grid DataContext="{Binding Model, ElementName=Root}">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
         <ToggleButton x:Name="PickerButton" Padding="12,7" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" ToolTip="{Binding SelectionText}"
                       AutomationProperties.Name="选择要替换的原曲">
             <Grid>
@@ -21,6 +22,9 @@
                 <TextBlock Grid.Column="1" Text="⌄" Margin="12,0,0,0" VerticalAlignment="Center" />
             </Grid>
         </ToggleButton>
+        <Button Grid.Column="1" Margin="8,0,0,0" Padding="10,5" Tag="{Binding CurrentSelection}"
+                Content="{Binding CurrentSelection.Playing, Converter={StaticResource BoolToText}, ConverterParameter='停止|试听', FallbackValue=试听}"
+                ToolTip="试听原曲" IsEnabled="{Binding HasSelection}" Click="Preview_Click" />
         <Popup x:Name="PickerPopup" PlacementTarget="{Binding ElementName=PickerButton}" Placement="Bottom"
                IsOpen="{Binding IsChecked, ElementName=PickerButton, Mode=TwoWay}"
                StaysOpen="False" AllowsTransparency="True" Opened="Popup_Opened">
@@ -66,7 +70,7 @@
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <Grid Margin="3,5">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <StackPanel>
                                             <TextBlock Text="{Binding PickerTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                             <TextBlock Text="{Binding ReplacementInfoText}" FontSize="12" Margin="0,3,0,0"
@@ -74,6 +78,9 @@
                                         </StackPanel>
                                         <TextBlock Grid.Column="1" Text="{Binding ReplacementStateText}" FontSize="12" Margin="12,0,0,0"
                                                    VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <Button Grid.Column="2" Tag="{Binding}" Margin="10,0,0,0" Padding="8,4"
+                                                Content="{Binding Playing, Converter={StaticResource BoolToText}, ConverterParameter='停止|试听'}"
+                                                IsEnabled="{Binding Busy, Converter={StaticResource InverseBool}}" Click="Preview_Click" />
                                     </Grid>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -83,7 +90,10 @@
                                    Visibility="{Binding HasResults, Converter={StaticResource BoolToVis}, ConverterParameter=invert}" />
                     </Grid>
                     <Grid Grid.Row="3" Margin="0,8,0,0">
-                        <TextBlock Text="{Binding CountText}" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <StackPanel Margin="0,0,95,0">
+                            <TextBlock Text="{Binding CountText}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{Binding PreviewStatus}" FontSize="12" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
                         <Button Content="重置筛选" Command="{Binding ResetCommand}" HorizontalAlignment="Right" Padding="10,4" />
                     </Grid>
                 </Grid>

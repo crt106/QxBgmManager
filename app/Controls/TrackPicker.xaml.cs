@@ -4,6 +4,8 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using QxBgmManager.ViewModels;
+using QxBgmManager.Services;
+using System.Windows.Media;
 
 namespace QxBgmManager.Controls;
 
@@ -24,7 +26,35 @@ public partial class TrackPicker : UserControl
     public TrackRow? SelectedTrack { get => (TrackRow?)GetValue(SelectedTrackProperty); set => SetValue(SelectedTrackProperty, value); }
     public long? RequiredBytes { get => (long?)GetValue(RequiredBytesProperty); set => SetValue(RequiredBytesProperty, value); }
 
-    public TrackPicker() => InitializeComponent();
+    private CancellationTokenSource? _previewCts;
+    public TrackPicker()
+    {
+        InitializeComponent();
+        Loaded += (_, _) => { AudioPreviewService.PlaybackChanged += SyncPlayback; SyncPlayback(); };
+        Unloaded += (_, _) => { AudioPreviewService.PlaybackChanged -= SyncPlayback; _previewCts?.Cancel(); };
+    }
+
+    private void SyncPlayback()
+    {
+        foreach (var row in ItemsSource ?? [])
+            row.Playing = AudioPreviewService.IsPlayingPath(TrackPreviewService.CachePath(row.Entry, true, ".wav"));
+    }
+
+    private async void Preview_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Button { Tag: TrackRow row }) return;
+        if (row.Playing) { TrackPreviewService.Stop(); Model.PreviewStatus = ""; return; }
+        _previewCts?.Cancel();
+        using var cts = new CancellationTokenSource();
+        _previewCts = cts;
+        row.Busy = true;
+        Model.PreviewStatus = "正在准备试听…";
+        try { await TrackPreviewService.PlayAsync(row, true, cts.Token); Model.PreviewStatus = "正在试听：" + row.TrackName; }
+        catch (OperationCanceledException) { Model.PreviewStatus = ""; }
+        catch (Exception ex) { Model.PreviewStatus = "试听失败：" + ex.Message; }
+        finally { row.Busy = false; if (ReferenceEquals(_previewCts, cts)) _previewCts = null; }
+    }
 
     private static void ItemsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -45,6 +75,11 @@ public partial class TrackPicker : UserControl
     private void Result_Click(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left) return;
+        for (var node = e.OriginalSource as DependencyObject; node != null && node != ResultsList;)
+        {
+            if (node is Button) return;
+            node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node);
+        }
         if (e.OriginalSource is DependencyObject source &&
             ItemsControl.ContainerFromElement(ResultsList, source) is ListBoxItem { DataContext: TrackRow row }) Commit(row);
     }
@@ -74,6 +109,7 @@ public partial class TrackPicker : UserControl
 
     private void Results_KeyDown(object sender, KeyEventArgs e)
     {
+        if (e.OriginalSource is Button) return;
         if (e.Key == Key.Enter && ResultsList.SelectedItem is TrackRow row) { Commit(row); e.Handled = true; }
         else if (e.Key == Key.Escape) { PickerButton.IsChecked = false; e.Handled = true; }
     }

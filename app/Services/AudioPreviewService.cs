@@ -39,7 +39,8 @@ public static class AudioPreviewService
 
     public static void Stop()
     {
-        Player.Stop();
+        _player?.Stop();
+        _player?.Close();
         CurrentPath = null;
         PlaybackChanged?.Invoke();
     }

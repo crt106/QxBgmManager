@@ -78,8 +78,12 @@ vendor\dotnet\dotnet.exe publish app\QxBgmManager.csproj -c Release -r win-x64 -
 | `PckService` | AKPK pck 读写 | patch 前先落备份再原子提交清单；restore 校验通过才清记录；与 bgm_swap.py 备份格式逐字段互认 |
 | `SchemeService` | qxbgm/v1 方案 | manifest 解析校验（未知字段忽略=前向兼容，版本不符拒绝，http 拒绝）、音频落地（URL/zip/本地/基地址）、安装单轨、导出 .qxbgmzip |
 | `RegistryService` | 方案市场 | LibGit2Sharp 浅克隆索引仓库、条目解析、语义化版本比较、共享配置（track-map/app-config）下载 |
-| `EncodeService` | 编解码子进程 | 封装 `python tools\ptadpcm_enc.py`；单飞行闸（同一时间一个子进程）；解析 `QXBGM_PROGRESS {json}` 进度行；取消即 Kill 整棵进程树 |
-| `AppState` | 跨页共享缓存 | 8 个 pck 全量条目 + 曲名映射 + 补丁标记；`EnsureLibraryAsync` 带 SemaphoreSlim 去重；patch 后须 `InvalidateLibrary()` |
+| `EncodeService` | 编解码子进程 | 封装 `python tools\ptadpcm_enc.py`；编码/导出共用限流，试听另有通道；解析 `QXBGM_PROGRESS {json}`；取消即 Kill 整棵进程树 |
+| `EncodeCache` | 转码复用 | 内容、编码器及参数作为缓存键；命中前校验散列，完整产物原子复制 |
+| `SchemeInstallService` | 方案生命周期 | 先准备音频再升级；逐曲持久化登记；部分失败保留可恢复记录 |
+| `TrackPreviewService` | 选曲/曲库试听 | 区分原曲和当前音乐，按包身份及修改时间失效缓存；异步抽取解码 |
+| `TaskActivityService` | 窗口级任务栏 | 跨页面进度及取消入口，各流程结束时释放活动句柄 |
+| `AppState` | 跨页共享缓存 | 8 个 pck 全量条目 + 曲名映射 + 补丁标记；加载去重，变更版本和通知；patch 后须 `InvalidateLibrary()` |
 | `SettingsService` | 设置与定位 | `FindWorkspaceRoot()` 向上找 `tools\ptadpcm_enc.py` 定位仓库根；游戏根目录探测；Python/ffmpeg 解析 |
 | `TrackMapService` | fileID→曲名 | 三级降级：registry 共享缓存 → 本地 track-map.json → 2 条硬编码种子，绝不抛异常 |
 | `AppDataService` | 登记持久化 | `app\data\` 下 JSON 读写（安装登记等） |
@@ -100,6 +104,8 @@ Convert（编码转换）/ Market（方案市场）/ Schemes（方案管理）/ 
 1. **PCK 写入安全是红线**。patch 顺序固定：备份音频字节 → 原子写清单 → 改 pck 数据 → 改 LUT；
    restore 反向且带回读校验。任何改动不得破坏"任意一步中断后可安全重试恢复"的性质。
    `PatchWithCheckpoint` 的故障注入仅供离线自测使用。
+   新格式还保存原包指纹、原曲散列和替换副本；恢复前核验包身份，兼容中断产生的混合字节。
+   `.bin.new` 是恢复核验文件，不能当临时文件删除。详细说明见 `docs/WORKFLOW_RELIABILITY.md`。
 2. **测试不得触碰真实游戏 pck**。备份/恢复测试用合成 PCK（`PckSafetyTests`）；真实转码与曲库
    检查依赖本机环境，缺失时明确 `SKIP`。也不要把 `appsettings.json` 里的个人本机路径"修复"掉。
 3. **子进程输出在后台线程回调**。`EncodeService` 的 onLine / onProgress 回调不在 UI 线程，

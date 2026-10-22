@@ -94,6 +94,7 @@ public partial class ReplaceCenterViewModel : ObservableObject
 
     public void AddFiles(IEnumerable<string> paths)
     {
+        if (IsExecuting) return;
         foreach (var p in paths)
         {
             if (!File.Exists(p) || Jobs.Any(j => j.SourcePath == p)) continue;
@@ -105,21 +106,23 @@ public partial class ReplaceCenterViewModel : ObservableObject
 
     private async Task ReadSourceInfoAsync(ReplaceJob job, CancellationToken ct)
     {
+        string source = job.SourcePath;
         try
         {
-            var metadata = await Task.Run(() => AudioMetadataService.ReadAsync(job.SourcePath, ct), ct);
-            if (ct.IsCancellationRequested || !Jobs.Contains(job)) return;
+            var metadata = await Task.Run(() => AudioMetadataService.ReadAsync(source, ct), ct);
+            if (ct.IsCancellationRequested || !Jobs.Contains(job) || job.SourcePath != source) return;
             job.SourceSizeBytes = metadata.SizeBytes;
             job.SourceDurationSeconds = metadata.DurationSeconds;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { Log($"读取音频信息失败：{job.FileName}：{ex.Message}"); }
-        finally { job.IsReadingMetadata = false; }
+        finally { if (job.SourcePath == source) job.IsReadingMetadata = false; }
     }
 
     [RelayCommand]
     private void ClearJobs()
     {
+        if (IsExecuting) return;
         _metadataCts.Cancel();
         _metadataCts.Dispose();
         _metadataCts = new();
@@ -129,69 +132,90 @@ public partial class ReplaceCenterViewModel : ObservableObject
     // ---- 批量执行 ----
 
     [RelayCommand]
-    private async Task ExecuteAsync()
+    private Task ExecuteAsync() => RunJobsAsync(Jobs.Where(j => j.Status != "完成").ToList());
+
+    [RelayCommand]
+    private Task RetryJobAsync(ReplaceJob? job) => job == null || job.Status == "完成"
+        ? Task.CompletedTask : RunJobsAsync([job]);
+
+    [RelayCommand]
+    private void RemoveJob(ReplaceJob? job)
+    {
+        if (!IsExecuting && job != null) Jobs.Remove(job);
+    }
+
+    [RelayCommand]
+    private void ChangeSource(ReplaceJob? job)
+    {
+        if (IsExecuting || job == null) return;
+        var dlg = new Microsoft.Win32.OpenFileDialog { Title = "更换源音频", Filter = "音频文件|*.mp3;*.wav;*.flac;*.ogg;*.m4a;*.aac|所有文件|*.*" };
+        if (dlg.ShowDialog() != true) return;
+        job.SourcePath = dlg.FileName;
+        job.Status = "待执行"; job.Detail = ""; job.Progress = 0;
+        job.SourceDurationSeconds = null; job.IsReadingMetadata = true;
+        _ = ReadSourceInfoAsync(job, _metadataCts.Token);
+    }
+
+    private TaskActivityService.Activity? _activity;
+    private double _completedWeight, _totalWeight = 1;
+    private static double Weight(ReplaceJob job) => Math.Max(1, job.SourceDurationSeconds ?? 60);
+
+    internal async Task RunJobsAsync(IReadOnlyList<ReplaceJob> candidates)
     {
         if (IsExecuting) return;
-        var runnable = Jobs.Where(j => j.Target != null).ToList();
-        if (runnable.Count == 0)
-        {
-            ExecuteStatus = "请为至少一行选择目标条目。";
-            return;
-        }
+        if (candidates.Count == 0) { ExecuteStatus = "请添加待执行的任务"; return; }
         _cts = new CancellationTokenSource();
         IsExecuting = true;
-        DoneCount = 0;
-        ExecuteProgress = 0;
-        TotalCount = runnable.Count;
-        ExecuteStatus = "";
-        int done = 0, skipped = 0, failed = 0;
+        DoneCount = 0; ExecuteProgress = 0; TotalCount = candidates.Count;
+        _activity = TaskActivityService.Begin("替换音乐", () => _cts?.Cancel());
+        int done = 0, failed = 0;
         try
         {
-            foreach (var job in runnable)
+            ExecuteStatus = "正在检查任务…";
+            _activity.Report(ExecuteStatus, 0);
+            // 重新读取文件头，源文件自添加后被修改时也使用最新时长。
+            foreach (var job in candidates)
             {
                 _cts.Token.ThrowIfCancellationRequested();
-                if (job.TargetConflict)
-                {
-                    job.Status = "跳过";
-                    job.Detail = "请先恢复这首原曲";
-                    skipped++;
-                }
-                else
-                {
-                    try
-                    {
-                        await ProcessJobAsync(job, _cts.Token);
-                        done++;
-                    }
-                    catch (IOException ex)
-                    {
-                        job.Status = "失败";
-                        job.Detail = "替换失败，请重试";
-                        Log($"{job.FileName}：{ex.Message}");
-                        failed++;
-                    }
-                    catch (OperationCanceledException) { throw; }
-                    catch (Exception ex)
-                    {
-                        job.Status = "失败";
-                        job.Detail = ex.Message;
-                        failed++;
-                    }
-                }
-                DoneCount++;
-                ExecuteProgress = DoneCount * 100.0 / TotalCount;
+                await ReadSourceInfoAsync(job, _cts.Token);
             }
-            ExecuteStatus = $"执行完成：成功 {done}，跳过 {skipped}，失败 {failed}。";
-            AppState.InvalidateLibrary();
-            await RefreshPatchesAsync();
+            var errors = await Task.Run(() => ReplacementPreflight.Check(candidates), _cts.Token);
+            if (errors.Count > 0)
+            {
+                foreach (var (job, error) in errors) { job.Status = "需调整"; job.Detail = error; }
+                ExecuteStatus = $"有 {errors.Count} 条任务需要调整，尚未开始替换";
+                _activity.Report(ExecuteStatus, 0);
+                return;
+            }
+            _completedWeight = 0; _totalWeight = candidates.Sum(Weight);
+            foreach (var job in candidates)
+            {
+                _cts.Token.ThrowIfCancellationRequested();
+                try { await ProcessJobAsync(job, _cts.Token); done++; }
+                catch (OperationCanceledException) { job.Status = "已取消"; job.Detail = "可重试继续"; throw; }
+                catch (Exception ex) { job.Status = "失败"; job.Detail = ex.Message; Log($"{job.FileName}：{ex.Message}"); failed++; }
+                DoneCount++;
+                _completedWeight += Weight(job);
+                ExecuteProgress = _completedWeight * 100 / _totalWeight;
+                _activity.Report($"已处理 {DoneCount}/{TotalCount} 首", ExecuteProgress);
+            }
+            ExecuteStatus = $"执行完成：成功 {done}，失败 {failed}";
+            _activity.Report(ExecuteStatus, 100);
         }
         catch (OperationCanceledException)
         {
-            ExecuteStatus = $"已取消（完成 {DoneCount}/{runnable.Count}）。已写入的补丁保持有效。";
+            ExecuteStatus = $"已取消，已完成 {done} 首";
+            _activity.Report(ExecuteStatus, ExecuteProgress);
         }
+        catch (Exception ex) { ExecuteStatus = "任务检查失败：" + ex.Message; _activity.Report(ExecuteStatus, ExecuteProgress); }
         finally
         {
+            AppState.InvalidateLibrary();
+            try { await RefreshPatchesAsync(); }
+            catch (Exception ex) { Log("刷新状态失败：" + ex.Message); }
             IsExecuting = false;
+            _activity.Dispose(); _activity = null;
+            _cts.Dispose(); _cts = null;
         }
     }
 
@@ -205,7 +229,8 @@ public partial class ReplaceCenterViewModel : ObservableObject
             {
                 job.Progress = p.Percent;
                 job.Detail = p.DisplayText;
-                ExecuteProgress = (DoneCount + p.Percent / 100) * 100 / Math.Max(1, TotalCount);
+                ExecuteProgress = (_completedWeight + Weight(job) * p.Percent / 100 * 0.95) * 100 / _totalWeight;
+                _activity?.Report(job.FileName + " · " + p.DisplayText, ExecuteProgress);
             }));
         if (rc != 0 || !File.Exists(job.WemPath))
             throw new InvalidOperationException("编码失败（退出码 " + rc + "）");
@@ -220,6 +245,7 @@ public partial class ReplaceCenterViewModel : ObservableObject
         job.Status = "正在替换…";
         await Task.Run(() => PckService.Patch(entry.PckPath, entry.FileId, job.WemPath), ct);
         job.Status = "完成";
+        job.Progress = 100;
         job.Detail = "";
         Log($"{job.FileName} → {entry.PckName} #{entry.FileId}（{wemSize:N0} B）");
     }
@@ -252,6 +278,8 @@ public partial class ReplaceCenterViewModel : ObservableObject
             PatchesStatus = message;
             return;
         }
+        try
+        {
         var infos = await Task.Run(() => AppState.ScanPatches(root));
         UpdateTargets(infos);
         var rows = infos
@@ -263,12 +291,14 @@ public partial class ReplaceCenterViewModel : ObservableObject
         PatchesStatus = HasPatches
             ? $"已替换 {rows.Count} 首音乐"
             : "暂无替换记录";
+        }
+        catch (Exception ex) { PatchesStatus = "读取替换记录失败，请检查备份"; Log(ex.Message); }
     }
 
     [RelayCommand]
     private async Task RestoreAsync(PatchRow? row)
     {
-        if (row == null || row.Busy) return;
+        if (row == null || row.Busy || IsExecuting) return;
         row.Busy = true;
         try
         {
@@ -295,7 +325,7 @@ public partial class ReplaceCenterViewModel : ObservableObject
     [RelayCommand]
     private async Task RestoreAllAsync()
     {
-        if (!HasPatches) return;
+        if (!HasPatches || IsExecuting) return;
         var answer = MessageBox.Show(
             $"恢复全部 {Patches.Count} 首原曲？",
             "恢复原曲", MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -321,13 +351,21 @@ public partial class ReplaceCenterViewModel : ObservableObject
         }
     }
 
-    private void Log(string line) => App.Dispatch(() => LogLines.Add(line));
+    private void Log(string line) => App.Dispatch(() =>
+    {
+        LogLines.Add(line);
+        while (LogLines.Count > 300) LogLines.RemoveAt(0);
+    });
 }
 
 /// <summary>一行替换任务。</summary>
 public partial class ReplaceJob : ObservableObject
 {
-    public string SourcePath { get; set; } = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FileName))]
+    [NotifyPropertyChangedFor(nameof(WemPath))]
+    private string _sourcePath = "";
+    private readonly string _outputId = Guid.NewGuid().ToString("N");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TargetSummary))]
@@ -338,7 +376,14 @@ public partial class ReplaceJob : ObservableObject
     [NotifyPropertyChangedFor(nameof(CapacityWarning))]
     private bool _targetConflict;
     [ObservableProperty] private int _presetIndex;   // 0 普通 / 1 8bit(6kHz 低通)
-    [ObservableProperty] private string _status = "待执行";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanRun))]
+    [NotifyPropertyChangedFor(nameof(RunLabel))]
+    [NotifyPropertyChangedFor(nameof(CapacityAssessment))]
+    [NotifyPropertyChangedFor(nameof(CapacityWarning))]
+    private string _status = "待执行";
+    public bool CanRun => Status != "完成";
+    public string RunLabel => Status is "失败" or "已取消" or "需调整" or "跳过" ? "重试" : "执行";
     [ObservableProperty] private string _detail = "";
     [ObservableProperty] private double _progress;
     [ObservableProperty]
@@ -360,23 +405,23 @@ public partial class ReplaceJob : ObservableObject
           + $" · 源文件 {AudioMetadata.FormatBytes(SourceSizeBytes)}"
           + (EstimatedWemBytes is { } size ? $" · 预计转码 {AudioMetadata.FormatBytes(size)}" : "");
     public string TargetSummary => Target is { } row ? row.ReplacementInfoText + $" · 文件编号 {row.FileId}" : "";
-    public bool CapacityWarning => TargetConflict || (Target is { } row && EstimatedWemBytes is { } size && size > row.CapacityBytes);
-    public string CapacityAssessment => TargetConflict ? "这首原曲已替换，请先在下方恢复"
+    public bool CapacityWarning => Status != "完成" && (TargetConflict || (Target is { } row && EstimatedWemBytes is { } size && size > row.CapacityBytes));
+    public string CapacityAssessment => Status == "完成" ? "已替换" : TargetConflict ? "这首原曲已替换，请先在下方恢复"
         : Target is not { } row || EstimatedWemBytes is not { } size ? ""
         : size <= row.CapacityBytes ? "预计容量充足"
         : $"预计超出容量 {AudioMetadata.FormatBytes(size - row.CapacityBytes)}，请选择更长的原曲或缩短音频";
 
     public string FileName => Path.GetFileName(SourcePath);
     public string WemPath => Path.Combine(SettingsService.ImportDir,
-        Path.GetFileNameWithoutExtension(SourcePath) + ".wem");
+        _outputId + ".wem");
 
     partial void OnTargetChanged(TrackRow? oldValue, TrackRow? newValue)
     {
         bool sameTrack = oldValue?.FileId == newValue?.FileId &&
             string.Equals(oldValue?.Entry.PckPath, newValue?.Entry.PckPath, StringComparison.OrdinalIgnoreCase);
-        if (!sameTrack && Status is "完成" or "跳过" or "失败") { Status = "待执行"; Detail = ""; }
+        if (!sameTrack && Status is "完成" or "跳过" or "失败" or "需调整" or "已取消") { Status = "待执行"; Detail = ""; }
         TargetConflict = newValue is { IsPatched: true };
-        if (TargetConflict) Detail = "请先在下方恢复这首原曲";
+        if (TargetConflict && Status != "完成") Detail = "请先在下方恢复这首原曲";
         else if (Detail == "请先在下方恢复这首原曲") Detail = "";
     }
 }

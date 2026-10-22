@@ -14,12 +14,19 @@ public class EncodeService
 {
     private Process? _process;
     private static readonly SemaphoreSlim WorkerGate = new(1, 1);
+    private static readonly SemaphoreSlim PreviewGate = new(1, 1);
 
     public bool IsRunning => _process is { HasExited: false };
 
-    public Task<int> EncodeAsync(string sourcePath, string outWem, double lowPassHz,
+    public async Task<int> EncodeAsync(string sourcePath, string outWem, double lowPassHz,
         Action<string> onLine, CancellationToken ct, bool loop = false, Action<EncodeProgress>? onProgress = null)
-        => RunEncodeAsync(sourcePath, outWem, lowPassHz, onLine, ct, loop, onProgress);
+    {
+        onProgress?.Invoke(new EncodeProgress("prepare", 0, 0, 0));
+        int rc = await EncodeCache.GetOrEncodeAsync(sourcePath, outWem, lowPassHz, loop,
+            output => RunEncodeAsync(sourcePath, output, lowPassHz, onLine, ct, loop, onProgress),
+            message => { onLine(message); onProgress?.Invoke(new EncodeProgress("cached", 100, 0, 0)); }, ct);
+        return rc;
+    }
 
     private async Task<int> RunEncodeAsync(string sourcePath, string outWem, double lowPassHz,
         Action<string> onLine, CancellationToken ct, bool loop, Action<EncodeProgress>? onProgress)
@@ -35,12 +42,12 @@ public class EncodeService
 
     /// <summary>wem → wav（独立帧批量解码），产物供 MediaPlayer 试听。</summary>
     public Task<int> DecodeToWavAsync(string wemPath, string outWav,
-        Action<string> onLine, CancellationToken ct, Action<EncodeProgress>? onProgress = null)
+        Action<string> onLine, CancellationToken ct, Action<EncodeProgress>? onProgress = null, bool preview = false)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outWav))!);
         var encPy = Path.Combine(SettingsService.ToolsDir, "ptadpcm_enc.py");
         return RunAsync(SettingsService.ResolvePython(),
-            $"-u {Q(encPy)} decode {Q(wemPath)} {Q(outWav)} --progress", onLine, ct, onProgress);
+            $"-u {Q(encPy)} decode {Q(wemPath)} {Q(outWav)} --progress", onLine, ct, onProgress, preview);
     }
 
     /// <summary>wav → mp3（libmp3lame -q:a 4）。</summary>
@@ -53,13 +60,14 @@ public class EncodeService
     }
 
     private async Task<int> RunAsync(string exe, string args, Action<string> onLine, CancellationToken ct,
-        Action<EncodeProgress>? onProgress = null)
+        Action<EncodeProgress>? onProgress = null, bool preview = false)
     {
         if (string.IsNullOrWhiteSpace(exe))
             throw new FileNotFoundException("未找到可执行文件，请在设置页配置依赖路径。");
 
         onProgress?.Invoke(new EncodeProgress("wait", 0, 0, 0));
-        await WorkerGate.WaitAsync(ct);
+        var gate = preview ? PreviewGate : WorkerGate;
+        await gate.WaitAsync(ct);
         try
         {
             ct.ThrowIfCancellationRequested();
@@ -99,7 +107,7 @@ public class EncodeService
             ct.ThrowIfCancellationRequested();
             return process.ExitCode;
         }
-        finally { _process = null; WorkerGate.Release(); }
+        finally { _process = null; gate.Release(); }
     }
 
     private static async Task PumpAsync(StreamReader reader, Action<string> onLine)

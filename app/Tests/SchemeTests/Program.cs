@@ -504,6 +504,7 @@ PckSafetyTests.Run(Check);
 await EncodeServiceTests.Run(Check);
 TrackPickerTests.Run(Check);
 await TrackPickerTests.CheckMetadataAsync(Check);
+await WorkflowTests.Run(Check);
 Console.WriteLine(failures == 0 ? "ALL PASS" : $"{failures} FAILURES");
 return failures;
 

@@ -7,6 +7,9 @@ namespace QxBgmManager.Services;
 public static class AppState
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
+    private static long _revision;
+    public static long Revision => Interlocked.Read(ref _revision);
+    public static event Action? LibraryChanged;
 
     public static IReadOnlyList<PckEntry> Library { get; private set; } = [];
     public static Dictionary<uint, TrackInfo> TrackMap { get; private set; } = new();
@@ -26,6 +29,7 @@ public static class AppState
                 return (true, $"已加载 {Library.Count} 个条目（缓存）");
             return await Task.Run(() =>
             {
+                long revision = Revision;
                 try
                 {
                     var map = TrackMapService.Load();
@@ -34,8 +38,9 @@ public static class AppState
                         list.AddRange(PckService.ListEntries(pck));
                     TrackMap = map;
                     Library = list;
-                    Loaded = true;
+                    Loaded = revision == Revision;
                     LoadedRoot = gameRoot;
+                    Interlocked.Increment(ref _revision);
                     return (true, $"已加载 {list.Count} 个条目");
                 }
                 catch (Exception ex)
@@ -51,7 +56,13 @@ public static class AppState
     }
 
     /// <summary>补丁/复原后调用：让下一次 EnsureLibraryAsync 重新读取 LUT 大小。</summary>
-    public static void InvalidateLibrary() => Loaded = false;
+    public static void InvalidateLibrary()
+    {
+        Interlocked.Increment(ref _revision);
+        Loaded = false;
+        if (System.Windows.Application.Current is { } app)
+            app.Dispatcher.BeginInvoke(() => LibraryChanged?.Invoke(), System.Windows.Threading.DispatcherPriority.Background);
+    }
 
     /// <summary>当前 LUT 里该 pck 的已补丁 fileID 集合（备份存在即 patched）。</summary>
     public static HashSet<uint> PatchedIds(string pckPath)

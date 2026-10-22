@@ -55,6 +55,7 @@ public partial class ConvertViewModel : ObservableObject
 
     private CancellationTokenSource? _cts;
     private readonly EncodeService _runner = new();
+    private TaskActivityService.Activity? _activity;
 
     public ConvertViewModel()
     {
@@ -65,16 +66,30 @@ public partial class ConvertViewModel : ObservableObject
         _ = LoadLibraryAsync();
     }
 
-    private async Task LoadLibraryAsync()
+    internal long LoadedRevision { get; private set; } = -1;
+    private bool _loadingLibrary;
+
+    internal async Task LoadLibraryAsync()
     {
+        if (_loadingLibrary) return;
+        _loadingLibrary = true;
+        try
+        {
         var (ok, _) = await AppState.EnsureLibraryAsync(SettingsService.Current.GameRoot);
         if (!ok) return;
+        var patches = AppState.Library.Select(e => e.PckPath).Distinct().ToDictionary(p => p, AppState.PatchedIds);
         var rows = AppState.Library
             .Select(e => new TrackRow(e, AppState.InfoOf(e.FileId),
-                                      AppState.PatchedIds(e.PckPath).Contains(e.FileId)))
+                                      patches[e.PckPath].Contains(e.FileId)))
             .OrderBy(r => r.PckName).ThenBy(r => r.FileId)
             .ToList();
+        var previous = SelectedLibraryEntry;
         LibraryEntries = new ObservableCollection<TrackRow>(rows);
+        if (previous != null) SelectedLibraryEntry = rows.FirstOrDefault(r => r.FileId == previous.FileId && r.Entry.PckPath == previous.Entry.PckPath);
+        LoadedRevision = AppState.Revision;
+        }
+        catch (Exception ex) { QueueStatus = "读取曲库状态失败：" + ex.Message; }
+        finally { _loadingLibrary = false; }
     }
 
     // ---- 文件添加（浏览 + 拖放共用）----
@@ -198,6 +213,7 @@ public partial class ConvertViewModel : ObservableObject
         if (pending.Count == 0) return;
         _cts = new CancellationTokenSource();
         IsRunning = true;
+        _activity = TaskActivityService.Begin("编码转换", () => _cts?.Cancel());
         QueueTotal = pending.Count;
         QueueDone = 0;
         QueueProgress = 0;
@@ -225,7 +241,10 @@ public partial class ConvertViewModel : ObservableObject
         }
         IsRunning = false;
         if (QueueStatus.StartsWith("队列执行中"))
-            QueueStatus = $"完成 {QueueDone}/{QueueTotal}。产物在输出目录。";
+            QueueStatus = $"已处理 {QueueDone}/{QueueTotal}，失败 {pending.Count(j => j.Status == "失败")} 条";
+        _activity.Report(QueueStatus, QueueProgress);
+        _activity.Dispose(); _activity = null;
+        _cts.Dispose(); _cts = null;
     }
 
     [RelayCommand]
@@ -300,7 +319,8 @@ public partial class ConvertViewModel : ObservableObject
     {
         job.Progress = progress.Percent;
         job.Detail = progress.DisplayText;
-        QueueProgress = (QueueDone + progress.Percent / 100) * 100 / Math.Max(1, QueueTotal);
+        QueueProgress = (QueueDone + progress.Percent / 100 * 0.95) * 100 / Math.Max(1, QueueTotal);
+        _activity?.Report(job.FileName + " · " + progress.DisplayText, QueueProgress);
     });
 
     private void Log(string line) => App.Dispatch(() =>

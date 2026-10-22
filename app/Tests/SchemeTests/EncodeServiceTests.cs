@@ -18,6 +18,8 @@ internal static class EncodeServiceTests
         }
         string dir = Path.Combine(Path.GetTempPath(), "qxbgm-encode-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
+        string? previousCache = EncodeCache.DirectoryOverride;
+        EncodeCache.DirectoryOverride = Path.Combine(dir, "cache");
         try
         {
             string source = Path.Combine(dir, "测试音频.wav"), wem = Path.Combine(dir, "完成.wem");
@@ -37,13 +39,22 @@ internal static class EncodeServiceTests
             var encoder = new EncodeService();
             var progress = new List<EncodeProgress>();
             var logs = new List<string>();
+            var timer = System.Diagnostics.Stopwatch.StartNew();
             int rc = await encoder.EncodeAsync(source, wem, 6000, line => logs.Add(line), default,
                 loop: true, onProgress: p => progress.Add(p));
+            double coldMs = timer.Elapsed.TotalMilliseconds;
             check(rc == 0 && File.Exists(wem), "真实 Python/FFmpeg 低通与循环编码完成（中文路径）");
             check(progress.Count > 4 && progress.Any(p => p.Percent > 0 && p.Percent < 100)
                 && progress.Last().Percent == 100, "真实子进程持续上报中间进度并到达 100%");
             check(progress.Zip(progress.Skip(1)).All(p => p.First.Percent <= p.Second.Percent), "转码百分比单调递增");
             check(!logs.Any(l => l.StartsWith("QXBGM_PROGRESS")), "机器进度不混入用户日志");
+            progress.Clear();
+            string reused = Path.Combine(dir, "复用.wem");
+            timer.Restart();
+            rc = await encoder.EncodeAsync(source, reused, 6000, _ => { }, default, loop: true, onProgress: p => progress.Add(p));
+            Console.WriteLine($"INFO  2 秒合成双声道音频：首次编码 {coldMs:F1} ms，缓存复用 {timer.Elapsed.TotalMilliseconds:F1} ms");
+            check(rc == 0 && progress.Any(p => p.Stage == "cached") && File.ReadAllBytes(wem).SequenceEqual(File.ReadAllBytes(reused)),
+                "真实编码产物可复用，复制结果逐字节一致且明确显示缓存命中");
             string decoded = Path.Combine(dir, "试听.wav");
             rc = await encoder.DecodeToWavAsync(wem, decoded, _ => { }, default);
             check(rc == 0 && new FileInfo(decoded).Length >= 44 + frames * 4, "批量解码与 WAV 导出完成");
@@ -61,6 +72,6 @@ internal static class EncodeServiceTests
             rc = await encoder.DecodeToWavAsync(wem, decoded, _ => { }, default);
             check(rc == 0, "取消后释放工作队列，后续任务正常执行");
         }
-        finally { Directory.Delete(dir, true); }
+        finally { EncodeCache.DirectoryOverride = previousCache; Directory.Delete(dir, true); }
     }
 }

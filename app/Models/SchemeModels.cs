@@ -69,6 +69,8 @@ public class SchemeEncode
 
 public class InstalledScheme
 {
+    [JsonPropertyName("status")] public string Status { get; set; } = "已安装";
+    [JsonPropertyName("lastError")] public string LastError { get; set; } = "";
     [JsonPropertyName("id")] public string Id { get; set; } = "";
     [JsonPropertyName("name")] public string Name { get; set; } = "";
     [JsonPropertyName("author")] public string Author { get; set; } = "";
@@ -83,6 +85,8 @@ public class InstalledScheme
 
 public class InstalledTrack
 {
+    [JsonPropertyName("wemSha256")] public string? WemSha256 { get; set; }
+    [JsonPropertyName("originalSha256")] public string? OriginalSha256 { get; set; }
     [JsonPropertyName("pckPath")] public string PckPath { get; set; } = "";
     [JsonPropertyName("pckName")] public string PckName { get; set; } = "";
     [JsonPropertyName("fileID")] public uint FileId { get; set; }

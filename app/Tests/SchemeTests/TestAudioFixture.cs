@@ -1,3 +1,5 @@
+using System.IO;
+
 /// <summary>自行生成的静音 PTADPCM WEM，不依赖游戏或本机研究音频。</summary>
 internal sealed class TestAudioFixture : IDisposable
 {

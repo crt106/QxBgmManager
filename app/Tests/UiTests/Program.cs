@@ -199,6 +199,57 @@ internal static class Program
         browse.UpdateLayout();
         var bottom = archive.TranslatePoint(new Point(0, archive.ActualHeight), browse).Y;
         Check(bottom <= 471, $"奇域档案展开后底部仍在矮窗口内（{bottom:F0}）");
+        await CheckTaskFooter(window, navigation);
+    }
+
+    private static async Task CheckTaskFooter(MainWindow window, NavigationView navigation)
+    {
+        bool canceled = false;
+        using (var activity = TaskActivityService.Begin("合成测试任务", () => canceled = true))
+        {
+            activity.Report("正在编码 · 42%", 42);
+            navigation.Navigate(typeof(ReplaceCenterPage));
+            await Settle();
+            var footer = (FrameworkElement)window.FindName("TaskFooter");
+            var page = Children<ReplaceCenterPage>(window).Single();
+            Children<ScrollViewer>(page).First().ScrollToBottom();
+            await Settle();
+            var position = footer.TranslatePoint(new Point(0, footer.ActualHeight), window);
+            Check(footer.IsVisible && position.Y <= window.ActualHeight && footer.ActualHeight > 20,
+                "矮窗口滚动到底后固定进度栏仍完整可见");
+            navigation.Navigate(typeof(LibraryPage));
+            await Settle();
+            Check(footer.IsVisible && TaskActivityService.Current.Progress == 42, "切换页面保留全局任务进度");
+            Snapshot(window, "workflow-fixed-progress");
+            TaskActivityService.Current.CancelCommand.Execute(null);
+            Check(canceled, "固定进度栏可取消正在执行的任务");
+        }
+        Check(!TaskActivityService.Current.IsRunning, "任务结束后禁用全局取消按钮");
+        var library = (LibraryViewModel)Children<LibraryPage>(window).Single().DataContext;
+        navigation.Navigate(typeof(ConvertPage));
+        await Settle();
+        long oldRevision = library.LoadedRevision;
+        AppState.InvalidateLibrary();
+        await AppState.EnsureLibraryAsync(SettingsService.Current.GameRoot);
+        navigation.Navigate(typeof(LibraryPage));
+        for (int i = 0; i < 100 && (library.IsLoading || library.LoadedRevision == oldRevision); i++) await Task.Delay(30);
+        Check(library.LoadedRevision == AppState.Revision && library.LoadedRevision != oldRevision,
+            "共享缓存已被其他页面重载后，曲库仍能识别版本变化并刷新");
+        navigation.Navigate(typeof(ConvertPage));
+        await Settle();
+        var convert = (ConvertViewModel)Children<ConvertPage>(window).Single().DataContext;
+        oldRevision = convert.LoadedRevision;
+        AppState.InvalidateLibrary();
+        for (int i = 0; i < 100 && convert.LoadedRevision == oldRevision; i++) await Task.Delay(30);
+        Check(convert.LoadedRevision == AppState.Revision, "后台替换发生变化时，当前转换页面自动同步曲库");
+        navigation.Navigate(typeof(ReplaceCenterPage));
+        await Settle();
+        var replace = (ReplaceCenterViewModel)Children<ReplaceCenterPage>(window).Single().DataContext;
+        while (replace.RefreshPatchesCommand.IsRunning) await Task.Delay(30);
+        var previousTargets = replace.Targets;
+        AppState.InvalidateLibrary();
+        for (int i = 0; i < 100 && ReferenceEquals(previousTargets, replace.Targets); i++) await Task.Delay(30);
+        Check(!ReferenceEquals(previousTargets, replace.Targets), "后台方案发生变化时，当前替换页面自动同步原曲状态");
     }
 
     private static async Task CheckTrackPicker(Window window, Page page, ReplaceCenterViewModel vm, ScrollViewer outer)
@@ -229,7 +280,7 @@ internal static class Program
                   && job.SourceSummary.Contains("0:03") && job.SourceSummary.Contains("源文件"), "任务界面显示源时长、大小和预计转码大小");
             var picker = Children<TrackPicker>(page).Single();
             var toggle = (ToggleButton)picker.FindName("PickerButton");
-            Check(toggle.ActualWidth >= picker.ActualWidth - 2, "原曲选择按钮占满可用宽度，长曲名可正常省略显示");
+            Check(toggle.ActualWidth >= picker.ActualWidth - 90, "原曲选择按钮适应可用宽度并为试听按钮预留空间");
             var popup = (Popup)picker.FindName("PickerPopup");
             var search = (System.Windows.Controls.TextBox)picker.FindName("SearchBox");
             var results = (ListBox)picker.FindName("ResultsList");
@@ -293,6 +344,16 @@ internal static class Program
             await vm.RefreshPatchesCommand.ExecuteAsync(null);
             await Settle();
             Check(job.Target?.FileId == target.FileId && job.Status == "完成", "刷新替换记录后仍保留原曲选择和已完成状态");
+            Check(!job.CanRun, "已完成任务禁用单条执行，避免重复替换");
+            await CheckPreview(picker);
+            vm.IsExecuting = true;
+            vm.RemoveJobCommand.Execute(job);
+            Check(vm.Jobs.Contains(job), "运行中的任务不能被删除");
+            vm.IsExecuting = false;
+            var delete = Children<System.Windows.Controls.Button>(page).First(b => b.Content?.ToString() == "删除" && ReferenceEquals(b.CommandParameter, job));
+            delete.Command!.Execute(delete.CommandParameter);
+            Check(!vm.Jobs.Contains(job), "单条删除按钮只移除指定任务");
+            await CheckReplacementExecution(vm, path);
         }
         finally
         {
@@ -300,6 +361,73 @@ internal static class Program
             window.Height = previousHeight;
             Directory.Delete(dir, true);
             await Settle();
+        }
+    }
+
+    private static async Task CheckReplacementExecution(ReplaceCenterViewModel vm, string source)
+    {
+        using var fixture = new SyntheticPckFixture();
+        var rows = PckService.ListEntries(fixture.PckPath).Select(e => new TrackRow(e, null, false)).ToList();
+        var first = new ReplaceJob { SourcePath = source, Target = rows[0] };
+        vm.Jobs.Add(first);
+        await vm.RetryJobCommand.ExecuteAsync(first);
+        Check(vm.ExecuteStatus.Contains("需要调整") && !PckService.IsPatched(fixture.PckPath) && File.ReadAllBytes(fixture.PckPath).SequenceEqual(fixture.Original),
+            "单条重试在容量不足时先拦截，合成音乐包保持原样");
+        string shortAudio = Path.Combine(fixture.DirectoryPath, "短音乐.wav");
+        const int samples = 4800;
+        using (var writer = new BinaryWriter(File.Create(shortAudio)))
+        {
+            writer.Write("RIFF"u8); writer.Write(36 + samples * 4); writer.Write("WAVEfmt "u8);
+            writer.Write(16); writer.Write((short)1); writer.Write((short)2); writer.Write(48000);
+            writer.Write(192000); writer.Write((short)4); writer.Write((short)16);
+            writer.Write("data"u8); writer.Write(samples * 4); writer.Write(new byte[samples * 4]);
+        }
+        first.SourcePath = shortAudio; first.Target = rows[0];
+        var second = new ReplaceJob { SourcePath = shortAudio, Target = rows[1] };
+        vm.Jobs.Add(second);
+        first.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ReplaceJob.Status) && first.Status == "完成") vm.CancelExecuteCommand.Execute(null); };
+        await vm.RunJobsAsync([first, second]);
+        Check(!vm.IsExecuting && vm.ExecuteStatus.StartsWith("已取消") && vm.DoneCount == 1 && PckService.ReadBackup(fixture.PckPath)?.Entries.Count == 1,
+            "真实替换完成第一首后取消，保留已写入结果且停止后续任务");
+        PckService.RestoreAll(fixture.PckPath);
+        Check(File.ReadAllBytes(fixture.PckPath).SequenceEqual(fixture.Original), "窗口任务写入的合成音乐包可以逐字节恢复");
+        vm.ClearJobsCommand.Execute(null);
+    }
+
+    private static async Task CheckPreview(TrackPicker previewPicker)
+    {
+        if (!File.Exists(SettingsService.ResolvePython()) || !File.Exists(SettingsService.ResolveFfmpeg()))
+        { Console.WriteLine("SKIP 未配置音频依赖，跳过窗口试听检查"); return; }
+        using var audio = new TestAudioFixture();
+        using var pck = new SyntheticPckFixture(File.ReadAllBytes(audio.WemPath));
+        var row = new TrackRow(PckService.GetEntry(pck.PckPath, 123), null, false);
+        // 使用实际任务行，临时绑定合成静音曲目；始终保留主窗口的输入焦点上下文。
+        var previousItems = previewPicker.ItemsSource;
+        var previousTrack = previewPicker.SelectedTrack;
+        previewPicker.SetCurrentValue(TrackPicker.ItemsSourceProperty, new[] { row });
+        previewPicker.SetCurrentValue(TrackPicker.SelectedTrackProperty, row);
+        previewPicker.Model.ResetCommand.Execute(null);
+        try
+        {
+            var previewToggle = (ToggleButton)previewPicker.FindName("PickerButton");
+            var previewPopup = (Popup)previewPicker.FindName("PickerPopup");
+            previewToggle.IsChecked = true;
+            await Settle();
+            var button = Children<System.Windows.Controls.Button>(previewPopup.Child).First(b => ReferenceEquals(b.Tag, row));
+            button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            for (int i = 0; i < 200 && row.Busy; i++) await Task.Delay(50);
+            await Settle();
+            Check(previewPopup.IsOpen && ReferenceEquals(previewPicker.SelectedTrack, row), "点击候选试听不会关闭下拉或改动已选原曲");
+            Check(previewPicker.Model.PreviewStatus.StartsWith("正在试听") && File.Exists(TrackPreviewService.CachePath(row.Entry, true, ".wav")),
+                "选曲试听完成真实合成 WEM 解码并调用播放器");
+            SnapshotElement((FrameworkElement)previewPopup.Child, "workflow-picker-preview");
+        }
+        finally
+        {
+            TrackPreviewService.Stop();
+            ((ToggleButton)previewPicker.FindName("PickerButton")).IsChecked = false;
+            previewPicker.SetCurrentValue(TrackPicker.ItemsSourceProperty, previousItems);
+            previewPicker.SetCurrentValue(TrackPicker.SelectedTrackProperty, previousTrack);
         }
     }
 

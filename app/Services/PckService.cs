@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using QxBgmManager.Models;
 
 namespace QxBgmManager.Services;
@@ -42,8 +43,11 @@ public static class PckService
 
     public static List<PckEntry> ListEntries(string pckPath)
     {
+        lock (Gate(pckPath))
+        {
         using var f = File.OpenRead(pckPath);
         return ListEntries(f, pckPath);
+        }
     }
 
     private static List<PckEntry> ListEntries(Stream f, string pckPath)
@@ -77,6 +81,8 @@ public static class PckService
     /// <summary>抽取条目字节为 .wem 文件（bgm_swap.py extract）。</summary>
     public static void ExtractEntry(string pckPath, uint fileId, string outPath)
     {
+        lock (Gate(pckPath))
+        {
         var e = GetEntry(pckPath, fileId);
         using var f = File.OpenRead(pckPath);
         f.Seek((long)e.Offset, SeekOrigin.Begin);
@@ -84,6 +90,42 @@ public static class PckService
         ReadExact(f, data);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         File.WriteAllBytes(outPath, data);
+        }
+    }
+
+    internal static bool IsReplacementComplete(string pckPath, BackupEntry backup)
+    {
+        lock (Gate(pckPath))
+        {
+            if (backup.ReplacementSha256 == null) return true; // 旧格式仅能沿用原有登记。
+            var e = GetEntry(pckPath, backup.FileId);
+            using var f = File.OpenRead(pckPath);
+            f.Position = (long)e.Offset;
+            byte[] bytes = new byte[e.Size];
+            ReadExact(f, bytes);
+            return Hash(bytes).Equals(backup.ReplacementSha256, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    internal static string EntryHash(string pckPath, uint fileId)
+    {
+        lock (Gate(pckPath))
+        {
+            var e = GetEntry(pckPath, fileId);
+            using var f = File.OpenRead(pckPath);
+            f.Position = (long)e.Offset;
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            byte[] bytes = new byte[65536];
+            long remaining = e.Size;
+            while (remaining > 0)
+            {
+                int n = (int)Math.Min(bytes.Length, remaining);
+                ReadExact(f, bytes.AsSpan(0, n));
+                hash.AppendData(bytes, 0, n);
+                remaining -= n;
+            }
+            return Convert.ToHexStringLower(hash.GetHashAndReset());
+        }
     }
 
     // ---- 备份读写（status 语义：备份文件存在即视为 patched）----
@@ -136,11 +178,15 @@ public static class PckService
                          ?? throw new InvalidDataException($"备份文件损坏：{bp}");
                 if (backup.Entries.Any(b => b.FileId == fileId))
                     throw new InvalidOperationException($"fileID {fileId} 已处于补丁状态，请先复原");
+                ValidateBackup(f, pckPath, backup);
             }
+
             else
             {
                 backup = new BgmBackup { Pck = Path.GetFullPath(pckPath) };
             }
+            backup.PckLength ??= f.Length;
+            backup.OriginalPckSha256 ??= CanonicalHash(f, pckPath, backup);
 
             f.Seek((long)e.Offset, SeekOrigin.Begin);
             byte[] origWem = new byte[e.Size];
@@ -158,12 +204,21 @@ public static class PckService
                 OrigWemB64 = null,
                 OrigWemFile = Path.GetFileName(binPath),
                 OrigLutHex = ToHexLower(origLut),
+                OrigWemSha256 = Hash(origWem),
+                ReplacementFile = Path.GetFileName(binPath + ".new"),
+                ReplacementSha256 = Hash(newBytes),
             };
             // 先持久化音频备份，再原子提交清单；任一步失败都不能触碰 PCK。
             WriteAtomic(binPath, origWem, overwrite: false);
-            backup.Entries.Add(record);
-            try { SaveBackup(bp, backup); }
-            catch { File.Delete(binPath); throw; }
+            bool replacementSaved = false;
+            try
+            {
+                WriteAtomic(binPath + ".new", newBytes, overwrite: false);
+                replacementSaved = true;
+                backup.Entries.Add(record);
+                SaveBackup(bp, backup);
+            }
+            catch { File.Delete(binPath); if (replacementSaved) File.Delete(binPath + ".new"); throw; }
             checkpoint?.Invoke("backup-saved");
 
             // 此后发生写入失败或进程中断，完整备份保留，恢复操作可安全重试。
@@ -175,6 +230,7 @@ public static class PckService
             f.Seek(e.LutPos, SeekOrigin.Begin);
             f.Write(origLut);
             f.Flush(flushToDisk: true);
+            AppState.InvalidateLibrary();
             return e;
         }
     }
@@ -202,7 +258,7 @@ public static class PckService
                          ?? throw new InvalidDataException("没有备份，无需复原");
             var entry = backup.Entries.FirstOrDefault(b => b.FileId == fileId)
                         ?? throw new InvalidDataException($"备份中没有 fileID {fileId}");
-            RestoreEntry(pckPath, entry);
+            RestoreEntry(pckPath, backup, entry);
             backup.Entries.Remove(entry);
             if (backup.Entries.Count == 0)
                 File.Delete(bp);
@@ -210,13 +266,13 @@ public static class PckService
                 SaveBackup(bp, backup);
             // 清单更新成功后才删除数据，恢复中断时不会留下指向缺失数据的清单。
             DeleteBin(pckPath, entry);
+            AppState.InvalidateLibrary();
         }
     }
 
-    private static void RestoreEntry(string pckPath, BackupEntry entry)
+    private static void RestoreEntry(string pckPath, BgmBackup backup, BackupEntry entry)
     {
-        string binPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(pckPath))!,
-                                      entry.OrigWemFile ?? "");
+        string binPath = DataPath(pckPath, entry.OrigWemFile);
         if (!File.Exists(binPath))
             throw new FileNotFoundException($"备份数据文件缺失：{binPath}");
         byte[] orig = File.ReadAllBytes(binPath);
@@ -224,6 +280,7 @@ public static class PckService
         if (lut.Length != LutEntrySize || orig.Length != entry.Size)
             throw new InvalidDataException("备份不完整，无法恢复");
         using var f = new FileStream(pckPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        ValidateBackup(f, pckPath, backup);
         f.Seek((long)entry.Offset, SeekOrigin.Begin);
         f.Write(orig, 0, orig.Length);
         f.Seek(entry.LutPos, SeekOrigin.Begin);
@@ -244,6 +301,101 @@ public static class PckService
         string binPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(pckPath))!,
                                       entry.OrigWemFile ?? "");
         if (File.Exists(binPath)) File.Delete(binPath);
+        if (entry.ReplacementFile != null) File.Delete(DataPath(pckPath, entry.ReplacementFile));
+    }
+
+    private static string Hash(byte[] data) => Convert.ToHexStringLower(SHA256.HashData(data));
+
+    private static string DataPath(string pck, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || Path.GetFileName(name) != name || name.Contains('/') || name.Contains('\\'))
+            throw new InvalidDataException("备份文件名无效");
+        return Path.Combine(Path.GetDirectoryName(Path.GetFullPath(pck))!, name);
+    }
+
+    /// <summary>写入前验证包身份及全部备份；允许中断写入留下的原始/替换字节混合。</summary>
+    private static void ValidateBackup(Stream f, string pck, BgmBackup backup)
+    {
+        if (backup.PckLength is { } length && length != f.Length)
+            throw new InvalidDataException("音乐包已变化，无法使用这份备份");
+        var entries = ListEntries(f, pck);
+        foreach (var b in backup.Entries)
+        {
+            var e = entries.SingleOrDefault(e => e.FileId == b.FileId);
+            byte[] lut = Convert.FromHexString(b.OrigLutHex ?? "");
+            byte[] orig = File.ReadAllBytes(DataPath(pck, b.OrigWemFile));
+            if (e == null || lut.Length != LutEntrySize || orig.Length != b.Size ||
+                b.Offset > (ulong)f.Length || b.Size > (ulong)f.Length - b.Offset ||
+                e.Offset != b.Offset || e.LutPos != b.LutPos ||
+                BinaryPrimitives.ReadUInt32LittleEndian(lut) != b.FileId ||
+                BinaryPrimitives.ReadUInt32LittleEndian(lut.AsSpan(4)) != e.Lang ||
+                BinaryPrimitives.ReadUInt32LittleEndian(lut.AsSpan(8)) != b.Size ||
+                BinaryPrimitives.ReadUInt64LittleEndian(lut.AsSpan(12)) != b.Offset)
+                throw new InvalidDataException("音乐包结构与备份不匹配，已停止恢复");
+            if (b.OrigWemSha256 != null && !Hash(orig).Equals(b.OrigWemSha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("原曲备份校验失败，已停止恢复");
+            if (b.ReplacementFile != null)
+            {
+                byte[] replacement = File.ReadAllBytes(DataPath(pck, b.ReplacementFile));
+                if (replacement.Length > orig.Length || !Hash(replacement).Equals(b.ReplacementSha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("替换记录校验失败，已停止恢复");
+                byte[] currentSize = BitConverter.GetBytes(e.Size), newSize = BitConverter.GetBytes((uint)replacement.Length);
+                if (Enumerable.Range(0, 4).Any(i => currentSize[i] != lut[8 + i] && currentSize[i] != newSize[i]))
+                    throw new InvalidDataException("音乐索引已变化，已停止恢复");
+                f.Position = (long)b.Offset;
+                byte[] buffer = new byte[65536];
+                for (int start = 0; start < orig.Length; start += buffer.Length)
+                {
+                    int count = Math.Min(buffer.Length, orig.Length - start);
+                    ReadExact(f, buffer.AsSpan(0, count));
+                    for (int i = 0; i < count; i++)
+                    {
+                        int index = start + i;
+                        byte expected = index < replacement.Length ? replacement[index] : (byte)0;
+                        if (buffer[i] != orig[index] && buffer[i] != expected)
+                            throw new InvalidDataException("音乐内容已被其他程序改动，已停止恢复");
+                    }
+                }
+            }
+            else if (e.Size > b.Size) throw new InvalidDataException("旧备份与当前音乐容量不匹配");
+        }
+        if (backup.OriginalPckSha256 != null &&
+            !CanonicalHash(f, pck, backup).Equals(backup.OriginalPckSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("音乐包版本与备份不匹配，已停止恢复");
+    }
+
+    // 将已替换区段视作原始字节，得到稳定的原包指纹；流式读取，不加载整个音乐包。
+    private static string CanonicalHash(Stream f, string pck, BgmBackup backup)
+    {
+        var ranges = backup.Entries.SelectMany(b => new[]
+        {
+            (Offset: b.LutPos, Size: (long)LutEntrySize, File: (string?)null, Bytes: Convert.FromHexString(b.OrigLutHex ?? "")),
+            (Offset: (long)b.Offset, Size: (long)b.Size, File: (string?)DataPath(pck, b.OrigWemFile), Bytes: Array.Empty<byte>())
+        }).OrderBy(r => r.Offset).ToList();
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = new byte[65536];
+        void Append(Stream source, long count)
+        {
+            while (count > 0)
+            {
+                int n = (int)Math.Min(buffer.Length, count);
+                ReadExact(source, buffer.AsSpan(0, n));
+                hash.AppendData(buffer, 0, n);
+                count -= n;
+            }
+        }
+        f.Position = 0;
+        foreach (var r in ranges)
+        {
+            if (r.Offset < f.Position || r.Offset > f.Length || r.Size > f.Length - r.Offset)
+                throw new InvalidDataException("备份区段无效");
+            Append(f, r.Offset - f.Position);
+            if (r.File == null) hash.AppendData(r.Bytes);
+            else { using var original = File.OpenRead(r.File); Append(original, r.Size); }
+            f.Position = r.Offset + r.Size;
+        }
+        Append(f, f.Length - f.Position);
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
     // ---- 小工具 ----

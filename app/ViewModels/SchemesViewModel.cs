@@ -50,6 +50,8 @@ public partial class SchemesViewModel : ObservableObject
     [RelayCommand]
     private async Task RefreshInstalledAsync()
     {
+        try
+        {
         await Task.Run(() =>
         {
             var rows = InstallRegistryService.Load()
@@ -61,6 +63,8 @@ public partial class SchemesViewModel : ObservableObject
                 Installed = new ObservableCollection<InstalledSchemeRow>(rows);
             });
         });
+        }
+        catch (Exception ex) { ExecuteStatus = "读取方案登记失败：" + ex.Message; }
     }
 
     // ---- 打开方案 ----
@@ -146,154 +150,48 @@ public partial class SchemesViewModel : ObservableObject
         if (_manifest == null || IsExecuting) return;
         var manifest = _manifest;
         var selected = Tracks.Where(t => t.Selected).ToList();
-        if (selected.Count == 0)
-        {
-            ExecuteStatus = "请先勾选要安装的曲目。";
-            return;
-        }
-
+        if (selected.Count == 0) { ExecuteStatus = "请先勾选曲目"; return; }
         _cts = new CancellationTokenSource();
         IsExecuting = true;
-        DoneCount = 0;
-        ExecuteProgress = 0;
-        TotalCount = selected.Count;
-        var installed = new InstalledScheme
-        {
-            Id = manifest.Id,
-            Name = manifest.Name,
-            Author = manifest.Author,
-            Description = manifest.Description,
-            InstalledAt = DateTime.Now,
-        };
-        int patched = 0, skipped = 0, failed = 0;
+        DoneCount = 0; TotalCount = selected.Count; ExecuteProgress = 0;
+        using var activity = TaskActivityService.Begin("安装方案", () => _cts?.Cancel());
         try
         {
-            foreach (var row in selected)
-            {
-                _cts.Token.ThrowIfCancellationRequested();
-                TotalCount = selected.Count;
-                try
+            var previous = InstallRegistryService.Load().FirstOrDefault(s => s.Id == manifest.Id);
+            using var prepared = await SchemeInstallService.PrepareAsync(manifest, selected.Select(r => r.Track),
+                AppState.Library, _packageZip, null, previous, false, Log, (i, text, p) => App.Dispatch(() =>
                 {
-                    await ProcessTrackAsync(manifest, row, installed.Tracks, _cts.Token);
-                    if (row.Failed) failed++;
-                    else if (row.Phase.StartsWith("跳过")) skipped++;
-                    else patched++;
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    row.Phase = "失败";
-                    row.Detail = ex.Message;
-                    failed++;
-                }
-                DoneCount++;
-                ExecuteProgress = DoneCount * 100.0 / TotalCount;
-            }
-
-            if (installed.Tracks.Count > 0)
+                    selected[i].Phase = text; selected[i].Failed = false;
+                    ExecuteProgress = 80.0 * (i + (p?.Percent ?? 0) / 100) / TotalCount;
+                    activity.Report(text, ExecuteProgress);
+                }), _cts.Token);
+            var installed = new InstalledScheme { Id = manifest.Id, Name = manifest.Name, Author = manifest.Author,
+                Description = manifest.Description, InstalledAt = DateTime.Now };
+            await SchemeInstallService.InstallAsync(installed, prepared, (i, text) => App.Dispatch(() =>
             {
-                InstallRegistryService.Upsert(installed);
-                AppState.InvalidateLibrary();
-                Log($"方案 {manifest.Name} 安装完成：打入 {patched} 条，跳过 {skipped} 条，失败 {failed} 条。");
-                ExecuteStatus = $"安装完成：打入 {patched} 条，跳过 {skipped} 条，失败 {failed} 条。" +
-                                (skipped > 0 ? " 跳过的条目此前已处于补丁状态。" : "");
-                if (manifest.Wonderland != null)
-                    WonderPrompt = $"本方案关联奇域「{manifest.Wonderland.Name}」（{manifest.Wonderland.Id}），可一键登记到奇域档案。";
-            }
-            else
-            {
-                ExecuteStatus = $"没有可登记的曲目（跳过 {skipped}，失败 {failed}）。";
-            }
-            await RefreshInstalledAsync();
+                selected[i].Phase = text; selected[i].Detail = "";
+                if (text == "完成") DoneCount++;
+                ExecuteProgress = 80 + 20.0 * DoneCount / TotalCount;
+                activity.Report(text, ExecuteProgress);
+            }), _cts.Token);
+            ExecuteStatus = $"已安装 {DoneCount} 首音乐";
+            activity.Report(ExecuteStatus, 100);
+            if (manifest.Wonderland != null) WonderPrompt = $"可登记奇域「{manifest.Wonderland.Name}」";
         }
-        catch (OperationCanceledException)
+        catch (Exception ex)
         {
-            ExecuteStatus = $"已取消（完成 {DoneCount}/{selected.Count}）。已写入的补丁保持有效。";
-            if (installed.Tracks.Count > 0)
-            {
-                InstallRegistryService.Upsert(installed);
-                await RefreshInstalledAsync();
-            }
+            ExecuteStatus = ex is OperationCanceledException ? "已取消，可继续安装或恢复已完成曲目" : "安装未完成：" + ex.Message;
+            foreach (var row in selected.Where(r => r.Phase != "完成"))
+            { row.Phase = ex is OperationCanceledException ? "已取消" : "失败"; row.Detail = ExecuteStatus; row.Failed = true; }
+            activity.Report(ExecuteStatus, ExecuteProgress);
         }
         finally
         {
+            AppState.InvalidateLibrary();
             IsExecuting = false;
+            _cts.Dispose(); _cts = null;
+            await RefreshInstalledAsync();
         }
-    }
-
-    private async Task ProcessTrackAsync(SchemeManifest manifest, SchemeTrackRow row,
-        List<InstalledTrack> installedTracks, CancellationToken ct)
-    {
-        var t = row.Track;
-        if (row.Entry == null)
-        {
-            row.Phase = "失败";
-            row.Detail = "目标条目不在当前曲库";
-            row.Failed = true;
-            return;
-        }
-
-        // 1. 音频落地（下载/解包/本地直用 + sha256）
-        row.Phase = "下载/定位音频…";
-        string audioPath = await SchemeService.ResolveAudioAsync(manifest, t, _packageZip,
-            progress => App.Dispatch(() =>
-            {
-                row.Detail = progress.Total > 0
-                    ? $"下载 {progress.Done / 1048576.0:F1}/{progress.Total / 1048576.0:F1} MB"
-                    : $"下载 {progress.Done / 1048576.0:F1} MB";
-            }), ct);
-
-        // 2. 编码（kind=raw）或直接采用（kind=wem）
-        string wemPath;
-        if (t.Audio.Kind == SchemeService.KindRaw)
-        {
-            row.Phase = "编码…";
-            row.Detail = "";
-            wemPath = SchemeService.RawWemPath(manifest.Id, t);
-            var preset = t.Encode?.Preset ?? "normal";
-            int rc = await _encoder.EncodeAsync(audioPath, wemPath, PresetService.HzForPreset(preset),
-                Log, ct, loop: t.Encode?.Loop ?? false, onProgress: p => App.Dispatch(() =>
-                {
-                    row.Detail = p.DisplayText;
-                    ExecuteProgress = (DoneCount + p.Percent / 100) * 100 / Math.Max(1, TotalCount);
-                }));
-            if (rc != 0 || !File.Exists(wemPath))
-                throw new InvalidOperationException("编码失败（退出码 " + rc + "）");
-        }
-        else
-        {
-            wemPath = audioPath;
-        }
-
-        // 3. 容量复核（重读条目，避免曲库缓存过期）
-        row.Phase = "容量复核…";
-        var entry = PckService.GetEntry(row.Entry.PckPath, t.Target.FileId);
-        long wemSize = new FileInfo(wemPath).Length;
-        if (wemSize > entry.Size)
-        {
-            row.CapacityResult = $"✗ {wemSize:N0} > {entry.Size:N0} B";
-            throw new InvalidOperationException($"产物 {wemSize:N0} B 超出条目容量 {entry.Size:N0} B");
-        }
-        row.CapacityResult = $"✓ {wemSize:N0} ≤ {entry.Size:N0} B";
-
-        // 4. 写入补丁（已 patched 的跳过）
-        if (PckService.IsEntryPatched(entry.PckPath, entry.FileId))
-        {
-            row.Phase = "跳过（已替换）";
-            row.Detail = "请先恢复原曲，再安装方案";
-            return;
-        }
-        ct.ThrowIfCancellationRequested();
-        row.Phase = "正在替换…";
-        await Task.Run(() => PckService.Patch(entry.PckPath, entry.FileId, wemPath), ct);
-        installedTracks.Add(new InstalledTrack
-        {
-            PckPath = entry.PckPath,
-            PckName = entry.PckName,
-            FileId = entry.FileId,
-        });
-        row.Phase = "完成";
-        row.Detail = "";
     }
 
     [RelayCommand]
@@ -331,34 +229,18 @@ public partial class SchemesViewModel : ObservableObject
     [RelayCommand]
     private async Task UninstallAsync(InstalledSchemeRow? row)
     {
-        if (row == null || row.Busy) return;
+        if (row == null || row.Busy || IsExecuting) return;
         row.Busy = true;
-        int restored = 0;
-        var errors = new List<string>();
+        using var cts = new CancellationTokenSource();
+        using var activity = TaskActivityService.Begin("恢复方案", cts.Cancel);
         try
         {
-            foreach (var t in row.Scheme.Tracks)
-            {
-                try
-                {
-                    await Task.Run(() => PckService.RestoreOne(t.PckPath, t.FileId));
-                    restored++;
-                }
-                catch (Exception ex)
-                {
-                    errors.Add($"{t.PckName} #{t.FileId}：{ex.Message}");
-                }
-            }
-            InstallRegistryService.Remove(row.Scheme.Id);
-            AppState.InvalidateLibrary();
-            ExecuteStatus = $"已卸载「{row.Scheme.Name}」：复原 {restored}/{row.Scheme.Tracks.Count} 条" +
-                            (errors.Count > 0 ? "；失败 " + string.Join("；", errors.Take(3)) : "");
-            await RefreshInstalledAsync();
+            bool ok = await SchemeInstallService.UninstallAsync(row.Scheme, cts.Token);
+            ExecuteStatus = ok ? $"已恢复「{row.Name}」" : "部分恢复失败，保留未完成记录，可重试";
+            activity.Report(ExecuteStatus, ok ? 100 : 0);
         }
-        finally
-        {
-            row.Busy = false;
-        }
+        catch (Exception ex) { ExecuteStatus = ex is OperationCanceledException ? "恢复已取消" : ex.Message; activity.Report(ExecuteStatus, 0); }
+        finally { row.Busy = false; await RefreshInstalledAsync(); }
     }
 
     // ---- 导出 ----
@@ -455,7 +337,7 @@ public partial class InstalledSchemeRow : ObservableObject
     public string Name => Scheme.Name;
     public string IdText => Scheme.Id;
     public string TimeText => Scheme.InstalledAt.ToString("yyyy-MM-dd HH:mm");
-    public string TrackCountText => $"{Scheme.Tracks.Count} 首";
+    public string TrackCountText => $"{Scheme.Tracks.Count} 首 · {Scheme.Status}";
 
     [ObservableProperty] private bool _busy;
 

@@ -24,9 +24,12 @@ public partial class TrackPickerViewModel : ObservableObject
     private long? _requiredBytes;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SelectionText))]
+    [NotifyPropertyChangedFor(nameof(HasSelection))]
     private TrackRow? _currentSelection;
     [ObservableProperty] private string _countText = "";
     [ObservableProperty] private bool _hasResults;
+    [ObservableProperty] private string _previewStatus = "";
+    public bool HasSelection => CurrentSelection != null;
     public bool CanFilterByCapacity => RequiredBytes.HasValue;
     public string SelectionText => CurrentSelection?.PickerTitle ?? "搜索并选择原曲…";
 

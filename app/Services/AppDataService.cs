@@ -7,11 +7,12 @@ namespace QxBgmManager.Services;
 /// <summary>应用数据目录（与工作区 app\ 下的 appsettings.json 同级策略：跟工程走）+ 通用 JSON 读写。</summary>
 public static class AppDataService
 {
+    internal static string? DirectoryOverride { get; set; }
     public static string DataDir
     {
         get
         {
-            var dir = Path.Combine(SettingsService.FindWorkspaceRoot(), "app", "data");
+            var dir = DirectoryOverride ?? Path.Combine(SettingsService.FindWorkspaceRoot(), "app", "data");
             Directory.CreateDirectory(dir);
             return dir;
         }
@@ -32,12 +33,17 @@ public static class AppDataService
 
     public static void SaveJson(string fileName, object value)
     {
+        string path = Path.Combine(DataDir, fileName), temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(Path.Combine(DataDir, fileName),
-                JsonSerializer.Serialize(value, JsonOpts));
+            using (var f = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(f, value, JsonOpts);
+                f.Flush(true);
+            }
+            File.Move(temp, path, true);
         }
-        catch { /* 只读目录等场景忽略 */ }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 }
 
@@ -123,24 +129,39 @@ public static class WonderArchiveService
 public static class InstallRegistryService
 {
     private const string FileName = "installed-schemes.json";
+    private static readonly object Gate = new();
 
-    public static List<InstalledScheme> Load() => AppDataService.LoadJson<List<InstalledScheme>>(FileName) ?? new();
+    public static List<InstalledScheme> Load()
+    {
+        lock (Gate)
+        {
+            string path = Path.Combine(AppDataService.DataDir, FileName);
+            return File.Exists(path) ? JsonSerializer.Deserialize<List<InstalledScheme>>(File.ReadAllText(path))
+                ?? throw new InvalidDataException("方案登记损坏，请保留登记文件后重试") : new();
+        }
+    }
 
     public static void Save(IEnumerable<InstalledScheme> schemes)
         => AppDataService.SaveJson(FileName, schemes.ToList());
 
     public static void Upsert(InstalledScheme scheme)
     {
+        lock (Gate)
+        {
         var list = Load();
         list.RemoveAll(s => s.Id == scheme.Id);
         list.Add(scheme);
         Save(list);
+        }
     }
 
     public static void Remove(string id)
     {
+        lock (Gate)
+        {
         var list = Load();
         list.RemoveAll(s => s.Id == id);
         Save(list);
+        }
     }
 }

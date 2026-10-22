@@ -27,6 +27,8 @@ public class PckEntry
 public class BgmBackup
 {
     [JsonPropertyName("pck")] public string Pck { get; set; } = "";
+    [JsonPropertyName("pck_length")] public long? PckLength { get; set; }
+    [JsonPropertyName("original_pck_sha256")] public string? OriginalPckSha256 { get; set; }
     [JsonPropertyName("entries")] public List<BackupEntry> Entries { get; set; } = new();
 }
 
@@ -39,6 +41,9 @@ public class BackupEntry
     [JsonPropertyName("orig_wem_b64")] public string? OrigWemB64 { get; set; }
     [JsonPropertyName("orig_wem_file")] public string? OrigWemFile { get; set; }
     [JsonPropertyName("orig_lut_hex")] public string? OrigLutHex { get; set; }
+    [JsonPropertyName("orig_wem_sha256")] public string? OrigWemSha256 { get; set; }
+    [JsonPropertyName("replacement_file")] public string? ReplacementFile { get; set; }
+    [JsonPropertyName("replacement_sha256")] public string? ReplacementSha256 { get; set; }
 }
 
 /// <summary>补丁管理页的一行（一个 pck 内的一条活动补丁）。</summary>

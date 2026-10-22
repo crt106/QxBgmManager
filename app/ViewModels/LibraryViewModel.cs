@@ -41,6 +41,7 @@ public partial class LibraryViewModel : ObservableObject
 
     /// <summary>全量行数（性能自测用）。</summary>
     internal int AllRowsCount => _allRows.Count;
+    internal long LoadedRevision { get; private set; } = -1;
 
     public LibraryViewModel()
     {
@@ -88,6 +89,7 @@ public partial class LibraryViewModel : ObservableObject
             ApplyFilters();
             StatusText = $"已加载 {_allRows.Count} 首音乐";
             OnPlaybackChanged();
+            LoadedRevision = AppState.Revision;
             swTotal.Stop();
             Debug.WriteLine($"[Perf] RefreshAsync 总计（数据+VM 侧）: {swTotal.ElapsedMilliseconds} ms；渲染在 UI 线程另行发生");
         }
@@ -219,19 +221,10 @@ public partial class LibraryViewModel : ObservableObject
         row.Busy = true;
         try
         {
-            if (!File.Exists(row.WavPreviewPath))
-            {
-                StatusText = $"正在抽取并解码 {row.PckName} · {row.TrackName}…";
-                if (!File.Exists(row.WemPreviewPath))
-                    PckService.ExtractEntry(row.Entry.PckPath, row.FileId, row.WemPreviewPath);
-                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
-                var log = new List<string>();
-                int rc = await _encoder.DecodeToWavAsync(row.WemPreviewPath, row.WavPreviewPath,
-                    line => log.Add(line), cts.Token);
-                if (rc != 0 || !File.Exists(row.WavPreviewPath))
-                    throw new InvalidOperationException(string.Join("；", log.TakeLast(3)));
-            }
-            AudioPreviewService.Play(row.WavPreviewPath);
+            StatusText = $"正在准备试听「{row.TrackName}」…";
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            await TrackPreviewService.PlayAsync(row, false, cts.Token);
+            StatusText = $"正在试听「{row.TrackName}」";
         }
         catch (Exception ex)
         {

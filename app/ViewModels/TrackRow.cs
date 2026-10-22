@@ -57,8 +57,8 @@ public partial class TrackRow : ObservableObject
     /// <summary>导入/转换页下拉框展示文本，如「10071 难逃之阵 · 16.67 MB / 4:16」。</summary>
     public string CapacityText => $"{IndexText} {TrackName} · {SizeText} / {DurationText}";
 
-    public string WemPreviewPath => Path.Combine(SettingsService.PreviewDir, $"{PckName}.{FileId}.wem");
-    public string WavPreviewPath => Path.Combine(SettingsService.PreviewDir, $"{PckName}.{FileId}.wav");
+    public string WemPreviewPath => TrackPreviewService.CachePath(Entry, false, ".wem");
+    public string WavPreviewPath => TrackPreviewService.CachePath(Entry, false, ".wav");
 
     [ObservableProperty] private bool _isPatched;
     [ObservableProperty] private bool _playing;
