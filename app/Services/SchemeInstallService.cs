@@ -43,6 +43,13 @@ internal static class SchemeInstallService
                 {
                     if (!PckService.IsReplacementComplete(e.PckPath, b))
                         throw new SchemeException($"原曲 {e.FileId} 上次写入未完成，请先恢复再安装");
+                    if (t.Audio.Kind == SchemeService.KindWem && !string.IsNullOrWhiteSpace(t.Audio.Sha256) &&
+                        !string.Equals(t.Audio.Sha256, b.ReplacementSha256, StringComparison.OrdinalIgnoreCase))
+                        throw new SchemeException("方案内容已更新，请先卸载旧方案再安装");
+                    string installed = Path.Combine(dir, i + "-installed.wem");
+                    await Task.Run(() => PckService.ExtractEntry(e.PckPath, e.FileId, installed), ct);
+                    try { await WemValidationService.ValidateFileAsync(installed, ct); }
+                    catch (InvalidDataException ex) { throw new SchemeException(ex.Message); }
                     set.Tracks.Add(new(e, "", b.ReplacementSha256 ?? "", true));
                     report(i, "已安装", null);
                     continue;
@@ -61,12 +68,8 @@ internal static class SchemeInstallService
                     if (rc != 0) throw new SchemeException("编码失败，请检查音频后重试");
                 }
                 else await EncodeCache.CopyAtomicAsync(source, wem, ct);
-                using (var input = File.OpenRead(wem))
-                {
-                    byte[] header = new byte[12];
-                    if (input.Read(header) != 12 || !header.AsSpan(0, 4).SequenceEqual("RIFF"u8) || !header.AsSpan(8, 4).SequenceEqual("WAVE"u8))
-                        throw new SchemeException("音频格式无效，请重新选择方案");
-                }
+                try { await WemValidationService.ValidateFileAsync(wem, ct); }
+                catch (InvalidDataException ex) { throw new SchemeException(ex.Message); }
                 if (new FileInfo(wem).Length > capacity) throw new SchemeException($"原曲 {e.FileId} 容量不足，请缩短音频或更换原曲");
                 set.Tracks.Add(new(e, wem, await EncodeCache.HashFileAsync(wem, ct), false));
                 report(i, "音频已就绪", null);

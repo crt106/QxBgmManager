@@ -17,6 +17,7 @@ import struct
 import sys
 import hashlib
 import uuid
+from wem_validate import validate_wem
 
 LUT_ENTRY_SIZE = 20
 
@@ -207,8 +208,7 @@ def cmd_extract(args):
 def cmd_patch(args):
     with open(args.wem, "rb") as f:
         new = f.read()
-    if new[:4] != b"RIFF" or new[8:12] != b"WAVE":
-        sys.exit("replacement is not a RIFF/WAVE (.wem) file")
+    validate_wem(new)
     entries = {e["fileID"]: e for e in list_entries(args.pck)}
     e = entries.get(args.file_id)
     if not e:

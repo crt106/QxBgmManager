@@ -110,7 +110,8 @@ internal static class WorkflowTests
         string source = Path.Combine(dir, "cache-source.wav"), output = Path.Combine(dir, "cache-output.wem");
         File.WriteAllText(source, "源音频一");
         int calls = 0, hits = 0;
-        Task<int> Encode(string path) { calls++; File.WriteAllText(path, "完整转码产物"); return Task.FromResult(0); }
+        byte[] validWem = TestAudioFixture.Create();
+        Task<int> Encode(string path) { calls++; File.WriteAllBytes(path, validWem); return Task.FromResult(0); }
         Task<int> Run(double lowpass = 0, bool loop = false, CancellationToken ct = default) =>
             EncodeCache.GetOrEncodeAsync(source, output, lowpass, loop, Encode, _ => hits++, ct);
         await Run(); await Run();
@@ -121,10 +122,27 @@ internal static class WorkflowTests
         check(calls == 4, "源文件内容变化不会误用旧转码");
         foreach (string file in Directory.GetFiles(EncodeCache.DirectoryPath, "*.wem")) File.WriteAllText(file, "损坏");
         await Run();
-        check(calls == 5 && File.ReadAllText(output) == "完整转码产物", "损坏缓存自动重新编码，不复制错误产物");
+        check(calls == 5 && File.ReadAllBytes(output).SequenceEqual(validWem), "损坏缓存自动重新编码，不复制错误产物");
         File.WriteAllText(source, "并发音频");
         await Task.WhenAll(Run(), Run());
         check(calls == 6, "相同音频并发请求只编码一次");
+        foreach (string file in Directory.GetFiles(EncodeCache.DirectoryPath, "*.wem"))
+        {
+            byte[] invalid = validWem.ToArray(); invalid[40] = 1;
+            File.WriteAllBytes(file, invalid);
+            await File.WriteAllTextAsync(file + ".sha256", await EncodeCache.HashFileAsync(file, default));
+        }
+        await Run();
+        check(calls == 7 && File.ReadAllBytes(output).SequenceEqual(validWem), "散列正确但声道头错误的缓存也会重新编码");
+        File.WriteAllText(source, "无效编码输出");
+        bool invalidOutputRejected = false;
+        try
+        {
+            await EncodeCache.GetOrEncodeAsync(source, output, 0, false, path =>
+            { File.WriteAllText(path, "无效产物"); return Task.FromResult(0); }, _ => { }, default);
+        }
+        catch (InvalidDataException) { invalidOutputRejected = true; }
+        check(invalidOutputRejected && File.ReadAllBytes(output).SequenceEqual(validWem), "编码器返回成功但文件无效时不覆盖已有输出");
         using var canceled = new CancellationTokenSource(); canceled.Cancel();
         bool stopped = false;
         try { await Run(ct: canceled.Token); } catch (OperationCanceledException) { stopped = true; }
@@ -159,6 +177,11 @@ internal static class WorkflowTests
                 "继续安装保留旧曲目登记并完成剩余任务");
         }
         byte[] installedBytes = File.ReadAllBytes(pck);
+        manifest.Tracks[0].Audio.Sha256 = new string('0', 64);
+        bool changedRejected = false;
+        try { using var prepared = await Prepare(); } catch (SchemeException) { changedRejected = true; }
+        check(changedRejected && File.ReadAllBytes(pck).SequenceEqual(installedBytes), "同 ID 新内容不能误判为旧版本已经安装");
+        manifest.Tracks[0].Audio.Sha256 = null;
         manifest.Tracks[1].Audio.Uri = Path.Combine(fixture.DirectoryPath, "missing.wem");
         bool prepareFailed = false;
         try { using var prepared = await Prepare(true); } catch (SchemeException) { prepareFailed = true; }

@@ -232,10 +232,14 @@ def decode_channel(frames):
 
 
 def build_wem(channels, payload, num_samples, loop, rate=RATE):
+    from wem_validate import channel_config, validate_wem
+    config = channel_config(channels)
     block = 36 * channels
     fmt = struct.pack("<4sIHHIIHHH6s", b"fmt ", 24, 0x8311, channels, rate,
                       rate * block // SAMPLES_PER_FRAME,
-                      block, 4, 6, b"\x00\x00\x02\x31\x00\x00")
+                      block, 4, 6, struct.pack("<HI", 0, config))
+    if rate <= 0 or num_samples <= 0 or len(payload) != ((num_samples + 63) // 64) * block:
+        raise ValueError("音频采样数与数据长度不一致")
     chunks = [fmt, struct.pack("<4sI4s", b"JUNK", 4, b"\x00" * 4)]
     if loop:
         smpl = struct.pack("<4sI", b"smpl", 0x3C)
@@ -244,7 +248,9 @@ def build_wem(channels, payload, num_samples, loop, rate=RATE):
         chunks.append(smpl)
     chunks.append(struct.pack("<4sI", b"data", len(payload)) + payload)
     body = b"".join(chunks)
-    return b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WAVE" + body
+    wem = b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WAVE" + body
+    validate_wem(wem)
+    return wem
 
 
 class ProgressReporter:
@@ -341,7 +347,7 @@ def main():
     ap.add_argument("cmd", choices=["encode", "selftest", "decode"])
     ap.add_argument("src")
     ap.add_argument("out", nargs="?")
-    ap.add_argument("--channels", type=int, default=2)
+    ap.add_argument("--channels", type=int, choices=[1, 2], default=2)
     ap.add_argument("--loop", action="store_true")
     ap.add_argument("--lookahead", type=int, default=0, help="前瞻层数(0/1)，越大越慢越准")
     ap.add_argument("--heuristic", action="store_true", help="开启帧首index启发式(默认关闭)")

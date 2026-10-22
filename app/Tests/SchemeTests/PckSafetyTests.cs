@@ -25,9 +25,7 @@ internal static class PckSafetyTests
                 BinaryPrimitives.WriteUInt64LittleEndian(lut[12..], (ulong)(128 + i * 384));
             }
             File.WriteAllBytes(pck, original);
-            byte[] replacement = new byte[64];
-            Encoding.ASCII.GetBytes("RIFF").CopyTo(replacement, 0);
-            Encoding.ASCII.GetBytes("WAVE").CopyTo(replacement, 8);
+            byte[] replacement = TestAudioFixture.Create(channels: 1, frames: 1);
             File.WriteAllBytes(wem, replacement);
             string backup = PckService.BackupPath(pck);
 
@@ -75,7 +73,7 @@ internal static class PckSafetyTests
             Task.WaitAll(Task.Run(() => PckService.Patch(pck, 123, wem)), Task.Run(() => PckService.Patch(pck, 124, wem)));
             check(PckService.ReadBackup(pck)!.Entries.Count == 2, "同包并发替换保留两条独立备份");
             PckService.RestoreOne(pck, 123);
-            check(PckService.GetEntry(pck, 123).Size == 256 && PckService.GetEntry(pck, 124).Size == 64,
+            check(PckService.GetEntry(pck, 123).Size == 256 && PckService.GetEntry(pck, 124).Size == replacement.Length,
                 "单条恢复不影响另一条替换");
             PckService.RestoreAll(pck);
             check(File.ReadAllBytes(pck).SequenceEqual(original) && !File.Exists(backup), "全部恢复与原始 PCK 逐字节一致");

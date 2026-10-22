@@ -501,6 +501,7 @@ Check(script.Contains(testPid.ToString()) && script.Contains(testNew),
     "更新脚本：PID 与新 exe 路径注入正确");
 
 PckSafetyTests.Run(Check);
+await WemValidationTests.Run(Check);
 await EncodeServiceTests.Run(Check);
 TrackPickerTests.Run(Check);
 await TrackPickerTests.CheckMetadataAsync(Check);

@@ -85,7 +85,19 @@ public static class SchemeService
             var entry = zip.GetEntry("manifest.json")
                         ?? throw new SchemeException("包内缺少 manifest.json");
             using var reader = new StreamReader(entry.Open());
-            return ParseManifest(reader.ReadToEnd());
+            var manifest = ParseManifest(reader.ReadToEnd());
+            foreach (var track in manifest.Tracks.Where(t => t.Audio.Kind == KindWem))
+            {
+                if (Path.IsPathRooted(track.Audio.Uri) || IsHttpUrl(track.Audio.Uri, out _)) continue;
+                var audio = zip.GetEntry(track.Audio.Uri.Replace('\\', '/'))
+                    ?? throw new SchemeException("包内缺少音频：" + track.Audio.Uri);
+                using var input = audio.Open();
+                using var buffer = new MemoryStream();
+                input.CopyTo(buffer);
+                try { WemValidationService.Validate(buffer.GetBuffer().AsSpan(0, checked((int)buffer.Length))); }
+                catch (InvalidDataException ex) { throw new SchemeException(ex.Message); }
+            }
+            return manifest;
         }
         return ParseManifest(File.ReadAllText(path));
     }
@@ -180,6 +192,11 @@ public static class SchemeService
             if (!actual.Equals(track.Audio.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
                 throw new SchemeException(
                     $"sha256 校验失败：期望 {track.Audio.Sha256[..Math.Min(16, track.Audio.Sha256.Length)]}…，实际 {actual[..16]}…");
+        }
+        if (track.Audio.Kind == KindWem)
+        {
+            try { await WemValidationService.ValidateFileAsync(path, ct); }
+            catch (InvalidDataException ex) { throw new SchemeException(ex.Message); }
         }
         return path;
     }

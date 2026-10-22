@@ -157,10 +157,7 @@ public static class PckService
         lock (Gate(pckPath))
         {
             var newBytes = File.ReadAllBytes(wemPath);
-            if (newBytes.Length < 12 ||
-                Encoding.ASCII.GetString(newBytes, 0, 4) != "RIFF" ||
-                Encoding.ASCII.GetString(newBytes, 8, 4) != "WAVE")
-                throw new InvalidDataException("替换文件不是 RIFF/WAVE（.wem）格式");
+            WemValidationService.Validate(newBytes);
 
             // 从读取到写入始终持有同一文件句柄，禁止其他写入者在容量检查后改动文件。
             using var f = new FileStream(pckPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);

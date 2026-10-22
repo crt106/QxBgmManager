@@ -9,14 +9,21 @@ internal sealed class TestAudioFixture : IDisposable
     public TestAudioFixture()
     {
         Directory.CreateDirectory(_directory);
-        const int payloadLength = 72 * 64;
-        using var writer = new BinaryWriter(File.Create(WemPath));
+        File.WriteAllBytes(WemPath, Create());
+    }
+
+    internal static byte[] Create(int channels = 2, int frames = 64)
+    {
+        int payloadLength = channels * 36 * frames;
+        using var buffer = new MemoryStream();
+        using var writer = new BinaryWriter(buffer);
         writer.Write("RIFF"u8); writer.Write(56 + payloadLength); writer.Write("WAVEfmt "u8);
-        writer.Write(24); writer.Write((ushort)0x8311); writer.Write((ushort)2); writer.Write(48000);
-        writer.Write(54000); writer.Write((ushort)72); writer.Write((ushort)4); writer.Write((ushort)6);
-        writer.Write(new byte[] { 0, 0, 2, 0x31, 0, 0 });
+        writer.Write(24); writer.Write((ushort)0x8311); writer.Write((ushort)channels); writer.Write(48000);
+        writer.Write(27000 * channels); writer.Write((ushort)(36 * channels)); writer.Write((ushort)4); writer.Write((ushort)6);
+        writer.Write((ushort)0); writer.Write(channels == 1 ? 0x4101u : 0x3102u);
         writer.Write("JUNK"u8); writer.Write(4); writer.Write(0);
         writer.Write("data"u8); writer.Write(payloadLength); writer.Write(new byte[payloadLength]);
+        return buffer.ToArray();
     }
 
     public void Dispose() => Directory.Delete(_directory, true);
