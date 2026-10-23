@@ -1,4 +1,4 @@
-# QxBgmManager 开发环境一键准备
+﻿# QxBgmManager 开发环境一键准备
 # 用法: powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -21,7 +21,12 @@ Write-Host "==> dotnet OK"
 $deps = Join-Path $root "vendor\python-deps"
 if (-not (Test-Path (Join-Path $deps "numpy"))) {
     Write-Host "==> 安装 numpy 到 vendor\python-deps ..."
+    # 本机 python 可能不带 pip（如 uv 管理的解释器），优先 pip，回退 uv
     python -m pip install --target="$deps" numpy
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "==> pip 不可用，改用 uv ..."
+        uv pip install --target "$deps" numpy
+    }
 }
 python -c "import sys; sys.path.insert(0, r'$deps'); import numpy; print('numpy', numpy.__version__)"
 

@@ -31,7 +31,7 @@ public static class SettingsService
             if (File.Exists(Path.Combine(dir.FullName, "tools", "ptadpcm_enc.py")))
                 return dir.FullName;
         }
-        return @"D:\ProgramSource2\th01_BeyondLocal";
+        return @"D:\ProgramSource2\QxBgmManager";
     }
 
     public static string ToolsDir => Path.Combine(FindWorkspaceRoot(), "tools");

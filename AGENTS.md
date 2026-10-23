@@ -133,5 +133,5 @@ Convert（编码转换）/ Market（方案市场）/ Schemes（方案管理）/ 
 ## 已知本机默认值（不要当 bug 修）
 
 - `SettingsService.DefaultFfmpegPath` 与 `KnownGameRoots` 是作者机器的默认值，属刻意兜底。
-- `FindWorkspaceRoot` 找不到仓库时回退 `D:\ProgramSource2\th01_BeyondLocal`，同理。
+- `FindWorkspaceRoot` 找不到仓库时回退 `D:\ProgramSource2\QxBgmManager`，同理。
 - Mica/Backdrop 在 MainWindow 被关闭（NVIDIA 黑屏规避）；`RenderHardware=false` 时降级软件渲染。
