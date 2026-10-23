@@ -66,6 +66,9 @@ public partial class MarketViewModel : ObservableObject
             AppState.InvalidateLibrary();
 
             var (entries, warnings) = await Task.Run(() => RegistryService.LoadEntries(dir));
+            // 拉取失败降级用本地缓存时，状态栏一句提示太容易漏看，同时放入警告区提醒数据可能过期
+            if (message.StartsWith("拉取失败"))
+                warnings.Add(message);
             WarningsText = warnings.Count > 0 ? string.Join(Environment.NewLine, warnings) : "";
 
             var installed = InstallRegistryService.Load()

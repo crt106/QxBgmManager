@@ -438,8 +438,8 @@ const string p0Repo = @"D:\ProgramSource2\qxbgm-registry";
 if (Directory.Exists(p0Repo))
 {
     var (p0, p0Warns) = RegistryService.LoadEntries(p0Repo);
-    Check(p0.Any(e => e.Id == "touhou-8bit-youkai-komachi"),
-        $"P0 索引仓库读取 {p0.Count} 条（含 touhou-8bit-youkai-komachi，警告 {p0Warns.Count}）");
+    Check(p0.Count >= 1 && p0Warns.Count == 0 && p0.All(e => e.Id != "touhou-8bit-youkai-komachi"),
+        $"P0 索引仓库读取 {p0.Count} 条且无警告（已下架的 8bit 单曲不再出现）");
 }
 else
 {
