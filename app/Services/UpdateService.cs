@@ -39,7 +39,7 @@ public static class UpdateService
                 ?.InformationalVersion;
             return ParseVersion(info)
                    ?? Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3)
-                   ?? "0.1.1";
+                   ?? "0.1.2";
         }
     }
 
