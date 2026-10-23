@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
+using LibGit2Sharp;
 using QxBgmManager.Models;
 using QxBgmManager.Services;
 
@@ -313,6 +314,66 @@ try
         $"LoadEntries 容错：2 条有效 + 1 条损坏跳过警告（实际 {list.Count}/{warns.Count}）");
 }
 finally { try { Directory.Delete(idxDir, true); } catch { } }
+
+// 缓存自愈：半成品克隆（unborn HEAD）作废重建；克隆失败清理残件；缺 index/ 目录显式报错
+string regRoot = Path.Combine(Path.GetTempPath(), "qxbgm-registry-clone-" + Guid.NewGuid().ToString("N"));
+string srcRepo = Path.Combine(regRoot, "src.git");
+string cacheDir = RegistryService.CloneCacheDir(srcRepo);
+try
+{
+    // 合成远端索引仓库并提交一条目
+    Directory.CreateDirectory(Path.Combine(srcRepo, "index"));
+    Repository.Init(srcRepo);
+    await File.WriteAllTextAsync(Path.Combine(srcRepo, "index", "selftest-clone.json"),
+        """{"registry":"qxbgm-registry/v1","id":"selftest-clone","name":"克隆自测","version":"1.0.0"}""");
+    string branchName;
+    using (var src = new Repository(srcRepo))
+    {
+        Commands.Stage(src, "index/selftest-clone.json");
+        var sig = new Signature("selftest", "selftest@local", DateTimeOffset.Now);
+        src.Commit("init", sig, sig);
+        branchName = src.Head.FriendlyName;
+    }
+
+    RegistryService.ReplaceCloneCache(srcRepo, cacheDir);
+    bool refreshOk = RegistryService.TryRefreshCloneCache(cacheDir, out var refreshMsg);
+    var cloned = RegistryService.LoadEntries(cacheDir);
+    Check(refreshOk && refreshMsg == "已更新索引仓库缓存"
+          && cloned.Entries.Count == 1 && cloned.Entries[0].Id == "selftest-clone",
+        $"克隆缓存建立后可刷新且条目可加载（{refreshMsg}）");
+
+    // 模拟中断的半成品克隆：HEAD 停在未初始化分支、工作区为空（.git 保留）
+    File.Delete(Path.Combine(cacheDir, ".git", "refs", "heads", branchName));
+    await File.WriteAllTextAsync(Path.Combine(cacheDir, ".git", "HEAD"), "ref: refs/heads/ghost-branch\n");
+    foreach (var d in Directory.GetDirectories(cacheDir).Where(d => !d.EndsWith(".git")))
+        Directory.Delete(d, true);
+    foreach (var f in Directory.GetFiles(cacheDir)) File.Delete(f);
+    Check(!RegistryService.TryRefreshCloneCache(cacheDir, out _),
+        "半成品克隆（unborn HEAD）判定不可刷新，作废重建");
+    RegistryService.ReplaceCloneCache(srcRepo, cacheDir);
+    var healed = RegistryService.LoadEntries(cacheDir);
+    Check(healed.Entries.Count == 1 && healed.Entries[0].Id == "selftest-clone",
+        "作废重建后缓存与条目恢复");
+
+    // 克隆失败不留残件
+    string badSource = Path.Combine(regRoot, "not-exist.git");
+    string badDir = RegistryService.CloneCacheDir(badSource);
+    bool cloneThrew = false;
+    try { RegistryService.ReplaceCloneCache(badSource, badDir); }
+    catch { cloneThrew = true; }
+    Check(cloneThrew && !Directory.Exists(badDir), "克隆失败抛异常且清理残缺目录");
+
+    // 缺 index/ 目录显式报错（不再伪装成"损坏条目"计数）
+    string emptyDir = Path.Combine(regRoot, "empty");
+    Directory.CreateDirectory(emptyDir);
+    try { RegistryService.LoadEntries(emptyDir); Check(false, "缺 index/ 目录应显式报错"); }
+    catch (SchemeException) { Check(true, "缺 index/ 目录显式报错（不再计入损坏条目）"); }
+}
+finally
+{
+    RegistryService.TryDeleteDirectory(regRoot);
+    RegistryService.TryDeleteDirectory(cacheDir);
+}
 
 // 版本比较：1.0.0 < 1.0.1 < 1.2.0 < 1.10.0
 Check(RegistryService.CompareVersions("1.0.0", "1.0.1") < 0

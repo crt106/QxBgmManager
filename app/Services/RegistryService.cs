@@ -79,24 +79,87 @@ public static class RegistryService
             return await Task.Run(() =>
             {
                 var dir = CloneCacheDir(source);
-                if (Repository.IsValid(dir))
-                {
-                    using var repo = new Repository(dir);
-                    Commands.Fetch(repo, "origin", Array.Empty<string>(), new FetchOptions(), null);
-                    var tracked = repo.Head.TrackedBranch
-                                  ?? repo.Branches[$"origin/{repo.Head.FriendlyName}"];
-                    if (tracked != null)
-                        repo.Reset(ResetMode.Hard, tracked.Tip);
-                    return (dir, "已更新索引仓库缓存");
-                }
-                Directory.CreateDirectory(Path.GetDirectoryName(dir)!);
-                // LibGit2Sharp 不支持 depth 浅克隆（git2 未暴露），索引仓库仅 JSON 小文件，全量克隆可接受
-                Repository.Clone(source, dir, new CloneOptions());
+                if (Repository.IsValid(dir) && TryRefreshCloneCache(dir, out var message))
+                    return (dir, message);
+                ReplaceCloneCache(source, dir);
                 return (dir, "已克隆索引仓库");
             }, ct);
         }
 
         throw new SchemeException("索引源既不是本地路径也不是 git URL：" + source);
+    }
+
+    /// <summary>
+    /// 刷新已存在的索引缓存：fetch 后硬重置到远端分支。
+    /// unborn HEAD（上次克隆中断的半成品，无任何提交）或找不到远端跟踪分支时返回 false，由调用方作废重建；
+    /// fetch 失败但本地缓存完整时降级沿用本地并提示。缓存打不开视为损坏返回 false。
+    /// </summary>
+    public static bool TryRefreshCloneCache(string dir, out string message)
+    {
+        message = "";
+        try
+        {
+            using var repo = new Repository(dir);
+            // 半成品克隆：HEAD 停在 init 默认分支且无提交（远端是 main 时 TrackedBranch 永远为 null）
+            if (repo.Head.Tip == null)
+                return false;
+            try
+            {
+                Commands.Fetch(repo, "origin", Array.Empty<string>(), new FetchOptions(), null);
+            }
+            catch (Exception ex)
+            {
+                message = "拉取失败，使用本地已有索引：" + ex.Message;
+                return true;
+            }
+            var tracked = repo.Head.TrackedBranch
+                          ?? repo.Branches[$"origin/{repo.Head.FriendlyName}"];
+            if (tracked == null)
+                return false;
+            repo.Reset(ResetMode.Hard, tracked.Tip);
+            message = "已更新索引仓库缓存";
+            return true;
+        }
+        catch
+        {
+            return false; // 缓存打不开/重置失败 → 作废重建
+        }
+    }
+
+    /// <summary>作废缓存并重新克隆；克隆失败先清理残缺目录再抛原始异常，避免留下半成品缓存。</summary>
+    public static void ReplaceCloneCache(string source, string dir)
+    {
+        if (Directory.Exists(dir) && !TryDeleteDirectory(dir))
+            throw new SchemeException($"索引缓存无法清理，请手动删除后重试：{dir}");
+        Directory.CreateDirectory(Path.GetDirectoryName(dir)!);
+        // LibGit2Sharp 不支持 depth 浅克隆（git2 未暴露），索引仓库仅 JSON 小文件，全量克隆可接受
+        try { Repository.Clone(source, dir, new CloneOptions()); }
+        catch
+        {
+            TryDeleteDirectory(dir); // 尽力清理残件，不影响原始异常
+            throw;
+        }
+    }
+
+    /// <summary>删除目录，成功返回 true。git 松散对象带只读属性会导致直接 Delete 拒绝访问，先清除再删。</summary>
+    public static bool TryDeleteDirectory(string dir)
+    {
+        try
+        {
+            if (!Directory.Exists(dir)) return true;
+            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+            {
+                var attr = File.GetAttributes(f);
+                if ((attr & FileAttributes.ReadOnly) != 0)
+                    File.SetAttributes(f, attr & ~FileAttributes.ReadOnly);
+            }
+            Directory.Delete(dir, true);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     // ---- 条目解析 ----
@@ -122,14 +185,14 @@ public static class RegistryService
         return entry;
     }
 
-    /// <summary>解析 index/*.json；单条损坏跳过并记警告，不中断整体加载。</summary>
+    /// <summary>解析 index/*.json；单条损坏跳过并记警告，不中断整体加载。缺少 index/ 目录属仓库结构错误，直接抛。</summary>
     public static (List<RegistryEntry> Entries, List<string> Warnings) LoadEntries(string repoDir)
     {
         var entries = new List<RegistryEntry>();
         var warnings = new List<string>();
         var dir = Path.Combine(repoDir, "index");
         if (!Directory.Exists(dir))
-            return (entries, new List<string> { "索引仓库缺少 index/ 目录：" + repoDir });
+            throw new SchemeException("索引仓库缺少 index/ 目录，缓存可能不完整，请刷新重建：" + repoDir);
         foreach (var file in Directory.EnumerateFiles(dir, "*.json").OrderBy(f => f))
         {
             try
