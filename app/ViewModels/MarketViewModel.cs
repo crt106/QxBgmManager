@@ -63,6 +63,9 @@ public partial class MarketViewModel : ObservableObject
             var sharedMap = RegistryService.LoadSharedTrackMap(dir);
             var sharedConfig = RegistryService.LoadAppConfig(dir);
             AppState.SetSharedConfigs(sharedMap, sharedConfig);
+            // 曲名/分类映射落盘持久化：其他设备或下次会话不再依赖本次内存缓存
+            if (sharedMap is { Count: > 0 })
+                TrackMapService.PersistShared(sharedMap);
             AppState.InvalidateLibrary();
 
             var (entries, warnings) = await Task.Run(() => RegistryService.LoadEntries(dir));

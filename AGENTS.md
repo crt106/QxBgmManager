@@ -85,7 +85,7 @@ vendor\dotnet\dotnet.exe publish app\QxBgmManager.csproj -c Release -r win-x64 -
 | `TaskActivityService` | 窗口级任务栏 | 跨页面进度及取消入口，各流程结束时释放活动句柄 |
 | `AppState` | 跨页共享缓存 | 8 个 pck 全量条目 + 曲名映射 + 补丁标记；加载去重，变更版本和通知；patch 后须 `InvalidateLibrary()` |
 | `SettingsService` | 设置与定位 | `FindWorkspaceRoot()` 向上找 `tools\ptadpcm_enc.py` 定位仓库根；游戏根目录探测；Python/ffmpeg 解析 |
-| `TrackMapService` | fileID→曲名 | 三级降级：registry 共享缓存 → 本地 track-map.json → 2 条硬编码种子，绝不抛异常 |
+| `TrackMapService` | fileID→曲名 | 四级降级：registry 共享缓存 → 持久化副本（app\data\shared-track-map.json，市场刷新落盘）→ 本地 track-map.json → 2 条硬编码种子，绝不抛异常 |
 | `AppDataService` | 登记持久化 | `app\data\` 下 JSON 读写（安装登记等） |
 | `EnvCheckService` | 首启闸门 | 8 项环境检查，6 项 Critical 全过才能进主菜单 |
 | `UpdateService` | 自动更新 | GitHub Releases 固定源 → cmd 脚本自替换重启 |

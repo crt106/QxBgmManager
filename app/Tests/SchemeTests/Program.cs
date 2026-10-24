@@ -446,7 +446,7 @@ else
     Console.WriteLine("SKIP  P0 索引仓库不存在，跳过该断言");
 }
 
-// ---- 9. 共享配置中心化（registry 缓存 → 本地文件 → 种子） ----
+// ---- 9. 共享配置中心化（registry 缓存 → 持久化副本 → 本地文件 → 种子） ----
 string sharedDir = Path.Combine(Path.GetTempPath(), "qxbgm-sharedcfg-" + Guid.NewGuid().ToString("N"));
 try
 {
@@ -454,6 +454,9 @@ try
     string localMap = Path.Combine(sharedDir, "track-map.json");
     await File.WriteAllTextAsync(localMap,
         """{"tracks":[{"index":90002,"name":"本地曲目","fileID":555002}]}""");
+    // 持久化副本指向临时目录，隔离本机 app\data 真实状态
+    string persistedFile = Path.Combine(sharedDir, "persisted-track-map.json");
+    TrackMapService.PersistedMapFile = Path.Combine(sharedDir, "not-yet.json");
 
     // 优先级 1：registry 共享缓存（连显式路径也让位）
     AppState.SetSharedConfigs(new Dictionary<uint, TrackInfo>
@@ -464,12 +467,29 @@ try
     Check(viaShared.ContainsKey(555001) && !viaShared.ContainsKey(555002) && !viaShared.ContainsKey(122217526),
         "优先级1：registry 共享缓存覆盖本地文件与种子");
     AppState.SetSharedConfigs(null, null);
-    // 优先级 2/3
+    // 优先级 3/4
     var viaLocal = TrackMapService.Load(localMap);
     Check(viaLocal.ContainsKey(555002) && viaLocal.ContainsKey(122217526),
-        "优先级2：无共享缓存时读本地文件，种子兜底");
+        "无共享缓存与持久化副本时读本地文件，种子兜底");
     var viaSeed = TrackMapService.Load(Path.Combine(sharedDir, "no-such.json"));
-    Check(viaSeed.Count == 2 && viaSeed.ContainsKey(122217526), "优先级3：文件缺失降级为仅种子");
+    Check(viaSeed.Count == 2 && viaSeed.ContainsKey(122217526), "文件缺失降级为仅种子");
+
+    // 优先级 2：持久化副本（市场刷新落盘）优先于本地研究文件——其他设备/重启后的曲名分类来源
+    TrackMapService.PersistedMapFile = persistedFile;
+    TrackMapService.PersistShared(new Dictionary<uint, TrackInfo>
+    {
+        [555003] = new TrackInfo { FileId = 555003, Name = "持久化曲目", Index = 90003, Category = 102 },
+    });
+    var viaPersisted = TrackMapService.Load(localMap);
+    Check(File.Exists(persistedFile) && viaPersisted.ContainsKey(555003)
+          && !viaPersisted.ContainsKey(555002) && !viaPersisted.ContainsKey(122217526),
+        "优先级2：持久化副本整表优先于本地研究文件（PersistShared 落盘后可离线使用）");
+    // 副本损坏 → 降级本地文件
+    await File.WriteAllTextAsync(persistedFile, "{broken");
+    var viaPersistedBroken = TrackMapService.Load(localMap);
+    Check(viaPersistedBroken.ContainsKey(555002) && viaPersistedBroken.ContainsKey(122217526),
+        "持久化副本损坏时降级本地研究文件与种子");
+    TrackMapService.PersistedMapFile = "";
 
     // app-config 解析：全字段
     await File.WriteAllTextAsync(Path.Combine(sharedDir, "config", "app-config.json"), """
