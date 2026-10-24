@@ -138,7 +138,9 @@ finally
 }
 
 // ---- 5. track-map 扩展格式解析（新格式 / 旧格式 / 未知字段 / 文件缺失降级） ----
+// 注意：持久化副本优先于显式文件路径，本节全程指向不存在路径以隔离（副本行为在第 9 节专测）
 string mapTmp = Path.Combine(Path.GetTempPath(), "qxbgm-trackmap-selftest-" + Guid.NewGuid().ToString("N") + ".json");
+TrackMapService.PersistedMapFile = Path.Combine(Path.GetTempPath(), "qxbgm-trackmap-selftest-none-" + Guid.NewGuid().ToString("N") + ".json");
 try
 {
     const string newFormat = """
@@ -180,6 +182,7 @@ try
 }
 finally
 {
+    TrackMapService.PersistedMapFile = "";
     try { File.Delete(mapTmp); } catch { }
 }
 
@@ -448,6 +451,7 @@ else
 
 // ---- 9. 共享配置中心化（registry 缓存 → 持久化副本 → 本地文件 → 种子） ----
 string sharedDir = Path.Combine(Path.GetTempPath(), "qxbgm-sharedcfg-" + Guid.NewGuid().ToString("N"));
+TrackMapService.PersistedMapFile = Path.Combine(Path.GetTempPath(), "qxbgm-sharedcfg-none-" + Guid.NewGuid().ToString("N") + ".json");
 try
 {
     Directory.CreateDirectory(Path.Combine(sharedDir, "config"));
@@ -489,7 +493,6 @@ try
     var viaPersistedBroken = TrackMapService.Load(localMap);
     Check(viaPersistedBroken.ContainsKey(555002) && viaPersistedBroken.ContainsKey(122217526),
         "持久化副本损坏时降级本地研究文件与种子");
-    TrackMapService.PersistedMapFile = "";
 
     // app-config 解析：全字段
     await File.WriteAllTextAsync(Path.Combine(sharedDir, "config", "app-config.json"), """
@@ -543,6 +546,7 @@ try
 finally
 {
     AppState.SetSharedConfigs(null, null);
+    TrackMapService.PersistedMapFile = "";
     try { Directory.Delete(sharedDir, true); } catch { }
 }
 
