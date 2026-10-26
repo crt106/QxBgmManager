@@ -175,6 +175,37 @@
                 </Grid>
             </ui:CardControl>
 
+            <!-- 网络代理 -->
+            <ui:CardControl Margin="0,0,0,12" Icon="{ui:SymbolIcon Globe24}">
+                <ui:CardControl.Header>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBlock Grid.Row="0" Grid.Column="0" FontTypography="Body" Text="网络代理" />
+                        <ui:TextBlock Grid.Row="1" Grid.Column="0"
+                                      Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                      Text="访问 GitHub（索引同步/音频下载/自动更新）困难时填写本地代理。留空使用系统默认；奇域浏览跟随系统设置。" />
+                        <ui:TextBlock Grid.Row="2" Grid.Column="0" Margin="0,4,0,0"
+                                      Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                      Text="{Binding ProxyStatus}" />
+                        <ui:Button Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Margin="12,0,0,0"
+                                   Content="测试连接" Command="{Binding TestProxyCommand}"
+                                   IsEnabled="{Binding IsTestingProxy, Converter={StaticResource InverseBool}}" />
+                    </Grid>
+                </ui:CardControl.Header>
+                <Grid MinWidth="420">
+                    <ui:TextBox Text="{Binding ProxyUrl, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="http://127.0.0.1:7890" />
+                </Grid>
+            </ui:CardControl>
+
             <!-- 更新 -->
             <ui:CardExpander Margin="0,0,0,12" ContentPadding="0" Icon="{ui:SymbolIcon ArrowSync24}">
                 <ui:CardExpander.Header>

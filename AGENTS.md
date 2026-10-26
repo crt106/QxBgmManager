@@ -87,6 +87,7 @@ vendor\dotnet\dotnet.exe publish app\QxBgmManager.csproj -c Release -r win-x64 -
 | `SettingsService` | 设置与定位 | `FindWorkspaceRoot()` 向上找 `tools\ptadpcm_enc.py` 定位仓库根；游戏根目录探测；Python/ffmpeg 解析 |
 | `TrackMapService` | fileID→曲名 | 四级降级：registry 共享缓存 → 持久化副本（app\data\shared-track-map.json，市场刷新落盘）→ 本地 track-map.json → 2 条硬编码种子，绝不抛异常 |
 | `AppDataService` | 登记持久化 | `app\data\` 下 JSON 读写（安装登记等） |
+| `ProxyConfig` | 全局 HTTP(S) 代理 | 设置页配置；HttpClient.DefaultProxy 注入 + LibGit2Sharp ProxyOptions；留空恢复系统默认 |
 | `EnvCheckService` | 首启闸门 | 8 项环境检查，6 项 Critical 全过才能进主菜单 |
 | `UpdateService` | 自动更新 | GitHub Releases 固定源 → cmd 脚本自替换重启 |
 | `AudioPreviewService` | 试听 | MediaPlayer 单例，同一时间只播一条 |

@@ -58,9 +58,12 @@ public static class RegistryService
                     try
                     {
                         var sig = new Signature("QxBgmManager", "qxbgm@local", DateTimeOffset.Now);
+                        var pullFetch = new FetchOptions();
+                        ProxyConfig.ApplyTo(pullFetch);
                         Commands.Pull(repo, sig, new PullOptions
                         {
                             MergeOptions = new MergeOptions { FastForwardStrategy = FastForwardStrategy.FastForwardOnly },
+                            FetchOptions = pullFetch,
                         });
                         return (source, "已拉取最新索引");
                     }
@@ -100,12 +103,13 @@ public static class RegistryService
         try
         {
             using var repo = new Repository(dir);
-            // 半成品克隆：HEAD 停在 init 默认分支且无提交（远端是 main 时 TrackedBranch 永远为 null）
             if (repo.Head.Tip == null)
-                return false;
+                return false; // 半成品克隆：HEAD 停在 init 默认分支且无提交（远端是 main 时 TrackedBranch 永远为 null）
             try
             {
-                Commands.Fetch(repo, "origin", Array.Empty<string>(), new FetchOptions(), null);
+                var fetchOpts = new FetchOptions();
+                ProxyConfig.ApplyTo(fetchOpts);
+                Commands.Fetch(repo, "origin", Array.Empty<string>(), fetchOpts, null);
             }
             catch (Exception ex)
             {
@@ -133,7 +137,12 @@ public static class RegistryService
             throw new SchemeException($"索引缓存无法清理，请手动删除后重试：{dir}");
         Directory.CreateDirectory(Path.GetDirectoryName(dir)!);
         // LibGit2Sharp 不支持 depth 浅克隆（git2 未暴露），索引仓库仅 JSON 小文件，全量克隆可接受
-        try { Repository.Clone(source, dir, new CloneOptions()); }
+        try
+        {
+            var cloneOpts = new CloneOptions();
+            ProxyConfig.ApplyTo(cloneOpts.FetchOptions);
+            Repository.Clone(source, dir, cloneOpts);
+        }
         catch
         {
             TryDeleteDirectory(dir); // 尽力清理残件，不影响原始异常

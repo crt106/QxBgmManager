@@ -550,6 +550,21 @@ finally
     try { Directory.Delete(sharedDir, true); } catch { }
 }
 
+// ---- 9b. 网络代理配置（无网络依赖的单元断言） ----
+Check(ProxyConfig.Apply("not a url") != null, "代理：非法地址被拒绝且返回错误说明");
+Check(ProxyConfig.Apply("socks5://127.0.0.1:1080") != null, "代理：socks 地址暂不支持并明确报错");
+var proxyErr = ProxyConfig.Apply("http://127.0.0.1:7890");
+var proxyApplied = System.Net.Http.HttpClient.DefaultProxy as System.Net.WebProxy;
+Check(proxyErr == null && ProxyConfig.Current == "http://127.0.0.1:7890"
+      && proxyApplied?.Address?.Port == 7890,
+    "代理：http 地址应用到 HttpClient.DefaultProxy");
+var gitProxy = ProxyConfig.GitProxyOptions();
+Check(gitProxy.ProxyType == LibGit2Sharp.ProxyType.Specified && gitProxy.Url == ProxyConfig.Current,
+    "代理：git ProxyOptions = Specified + 当前地址");
+ProxyConfig.Apply("");
+Check(ProxyConfig.Current == "" && ProxyConfig.GitProxyOptions().ProxyType == LibGit2Sharp.ProxyType.Auto,
+    "代理：清空后恢复系统默认（git 回到 Auto）");
+
 // ---- 10. 自动更新：版本解析 / 更新判定 / 自更新脚本 ----
 Check(UpdateService.ParseVersion("v1.2.0") == "1.2.0"
       && UpdateService.ParseVersion("1.2.0") == "1.2.0"

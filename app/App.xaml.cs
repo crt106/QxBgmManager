@@ -10,6 +10,8 @@ public partial class App : Application
 
         var settings = Services.SettingsService.Load();
         Services.SettingsService.Current = settings;
+        // 保存过的代理配置先于任何网络请求生效（无效地址忽略，设置页会给出反馈）
+        Services.ProxyConfig.Apply(settings.ProxyUrl);
         ApplyTheme(settings.ThemeDark);
         // 默认硬件渲染（Mica 已在 MainWindow 关闭以规避 NVIDIA 黑屏）；RenderHardware=false 时降级软件渲染兜底
         if (!settings.RenderHardware)

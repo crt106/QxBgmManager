@@ -13,4 +13,6 @@ public class AppSettings
     public bool ThemeDark { get; set; } = true;
     /// <summary>实验：硬件渲染（默认软件渲染兜底黑屏；硬件模式自动关 Backdrop）。重启生效。</summary>
     public bool RenderHardware { get; set; } = true;
+    /// <summary>HTTP(S) 代理地址（如 http://127.0.0.1:7890）；空 = 不代理（用系统默认）。作用于市场/音频下载/自动更新与 git 索引同步。</summary>
+    public string ProxyUrl { get; set; } = "";
 }

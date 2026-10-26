@@ -16,6 +16,11 @@ public partial class SettingsViewModel : ObservableObject
     /// <summary>实验：硬件渲染（重启生效）。</summary>
     [ObservableProperty] private bool _renderHardware;
 
+    // ---- 网络代理 ----
+    [ObservableProperty] private string _proxyUrl = "";
+    [ObservableProperty] private string _proxyStatus = "未配置（使用系统默认）";
+    [ObservableProperty] private bool _isTestingProxy;
+
     // ---- 自动更新 ----
     [ObservableProperty] private string _appVersionText = "";
     [ObservableProperty] private bool _isCheckingUpdate;
@@ -52,6 +57,8 @@ public partial class SettingsViewModel : ObservableObject
             : s.RegistrySource;
         ThemeDark = s.ThemeDark;
         RenderHardware = s.RenderHardware;
+        ProxyUrl = s.ProxyUrl;
+        ProxyStatus = string.IsNullOrWhiteSpace(s.ProxyUrl) ? "未配置（使用系统默认）" : $"已启用：{s.ProxyUrl}";
         AppVersionText = UpdateService.CurrentVersion;
         ValidateGameRoot();
     }
@@ -185,6 +192,39 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task TestProxyAsync()
+    {
+        if (IsTestingProxy) return;
+        // 先临时应用输入框内容（无效地址直接报错，不落盘）
+        var error = Services.ProxyConfig.Apply(ProxyUrl);
+        if (error != null)
+        {
+            ProxyStatus = "无效：" + error;
+            return;
+        }
+        IsTestingProxy = true;
+        ProxyStatus = "正在测试…";
+        try
+        {
+            using var http = Services.ProxyConfig.CreateTestClient();
+            using var resp = await http.GetAsync("https://api.github.com/repos/crt106/qxbgm-registry/releases/latest");
+            ProxyStatus = resp.IsSuccessStatusCode
+                ? $"连接成功（GitHub API HTTP {(int)resp.StatusCode}）"
+                : $"可达但返回异常（HTTP {(int)resp.StatusCode}）";
+        }
+        catch (Exception ex)
+        {
+            ProxyStatus = "连接失败：" + ex.Message;
+        }
+        finally
+        {
+            // 还原为已保存的配置，避免未保存的输入悄悄生效
+            Services.ProxyConfig.Apply(SettingsService.Current.ProxyUrl);
+            IsTestingProxy = false;
+        }
+    }
+
+    [RelayCommand]
     private void CancelDownload() => _downloadCts?.Cancel();
 
     [RelayCommand]
@@ -197,6 +237,9 @@ public partial class SettingsViewModel : ObservableObject
         s.RegistrySource = RegistrySource;
         s.ThemeDark = ThemeDark;
         s.RenderHardware = RenderHardware;
+        s.ProxyUrl = ProxyUrl.Trim();
+        var proxyError = Services.ProxyConfig.Apply(s.ProxyUrl);
+        ProxyStatus = proxyError ?? (string.IsNullOrWhiteSpace(s.ProxyUrl) ? "未配置（使用系统默认）" : $"已启用：{s.ProxyUrl}");
         SettingsService.Save();
         ValidateGameRoot();
         GameRootStatus += "（已保存）";
